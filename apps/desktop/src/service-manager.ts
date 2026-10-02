@@ -5,11 +5,12 @@ import { hostOutputSchema, pingInputSchema, publicError, type ErrorCode, type Ho
 import { SERVICE_NODE_VERSION, SERVICE_PROTOCOL_VERSION } from '@aiappnest/domain';
 
 type Pending = { resolve: (result: Result<PingOutput>) => void; timer: NodeJS.Timeout };
-export function serviceEnvironment(): NodeJS.ProcessEnv {
+export function serviceEnvironment(dataRoot?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
-  for (const key of ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'LANG']) {
+  for (const key of ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'LANG', 'LOCALAPPDATA']) {
     if (process.env[key]) env[key] = process.env[key];
   }
+  if (dataRoot !== undefined) env.AIAPPNEST_DATA_ROOT = dataRoot;
   return env;
 }
 
@@ -23,7 +24,7 @@ export class ServiceManager extends EventEmitter {
   private finishStart?: (result: Result<ServiceStatus>) => void;
   private startTimer?: NodeJS.Timeout;
   private nonce = '';
-  constructor(private readonly options: { nodePath: string; entry: string; startupMs?: number; requestMs?: number; shutdownMs?: number }) { super(); }
+  constructor(private readonly options: { nodePath: string; entry: string; dataRoot?: string; startupMs?: number; requestMs?: number; shutdownMs?: number }) { super(); }
   snapshot(): ServiceStatus { return structuredClone(this.status); }
   private transition(phase: ServiceStatus['phase'], code?: ErrorCode) {
     this.status = { phase, revision: this.status.revision + 1, pid: phase === 'ready' ? this.child?.pid ?? null : null, error: code ? publicError(code) : null };
@@ -66,7 +67,7 @@ export class ServiceManager extends EventEmitter {
     this.startTimer = setTimeout(() => this.fail('START_TIMEOUT'), this.options.startupMs ?? 5000);
     try {
       const forkOptions: ForkOptions & { windowsHide: boolean } = {
-        execPath: this.options.nodePath, execArgv: [], env: serviceEnvironment(),
+        execPath: this.options.nodePath, execArgv: [], env: serviceEnvironment(this.options.dataRoot),
         stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true, serialization: 'json',
       };
       const child = fork(this.options.entry, [], forkOptions);
@@ -87,7 +88,7 @@ export class ServiceManager extends EventEmitter {
           clearTimeout(pending.timer);
           this.pending.delete(message.id);
           pending.resolve(message.result);
-        } else { this.fail('PROTOCOL_ERROR'); }
+        } else { this.fail(message.error.code); }
       });
       child.once('close', () => {
         if (child !== this.child) return;

@@ -10,7 +10,7 @@
 | apps/service-host | 独立 Node 24.19.0 进程，握手、诊断请求、关闭；后续承载业务服务 |
 | packages/contracts | Zod 严格运行时 schema、错误码、状态事件、DesktopAPI 类型 |
 | packages/domain | 与 Electron 无关的领域类型与固定运行时版本 |
-| packages/storage | SQLite 和仓储预留边界，无伪造实现 |
+| packages/storage | SQLite 连接、迁移、仓储、事务与托管目录，仅 Service Host 使用；详见 [存储架构](storage-architecture.md) |
 | packages/pi-adapter | 正式 Pi 适配预留边界，不导入 spike |
 | packages/memory | 记忆服务预留边界 |
 | packages/policy | 权限与审计预留边界，无默认放行实现 |

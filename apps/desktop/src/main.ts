@@ -25,7 +25,10 @@ if (!app.requestSingleInstanceLock()) {
   });
   void app.whenReady().then(async () => {
     const root = app.getAppPath();
-    service = new ServiceManager({ nodePath: join(root, 'runtime', process.platform === 'win32' ? 'node.exe' : 'node'), entry: join(root, 'service-host.cjs') });
+    service = new ServiceManager({ nodePath: join(root, 'runtime', process.platform === 'win32' ? 'node.exe' : 'node'), entry: join(root, 'service-host.cjs'),
+      // An explicitly selected Electron profile also isolates its platform data (tests/portable profiles).
+      dataRoot: app.commandLine.hasSwitch('user-data-dir') ? join(app.getPath('userData'), 'platform') : undefined,
+    });
     const ses = session.defaultSession;
     ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     ses.setPermissionCheckHandler(() => false);

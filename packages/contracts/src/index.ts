@@ -3,7 +3,7 @@ import { SERVICE_PROTOCOL_VERSION } from '@aiappnest/domain';
 
 export const errorCodeSchema = z.enum([
   'INVALID_INPUT', 'FORBIDDEN', 'NOT_READY', 'START_FAILED', 'START_TIMEOUT',
-  'PROTOCOL_ERROR', 'SERVICE_EXITED', 'REQUEST_TIMEOUT', 'SHUTTING_DOWN', 'BUSY',
+  'PROTOCOL_ERROR', 'SERVICE_EXITED', 'REQUEST_TIMEOUT', 'SHUTTING_DOWN', 'BUSY', 'STORAGE_UNAVAILABLE',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const errorSchema = z.strictObject({ code: errorCodeSchema, message: z.string().max(200) });
@@ -14,6 +14,7 @@ const messages: Record<ErrorCode, string> = {
   PROTOCOL_ERROR: '服务通信协议不匹配。', SERVICE_EXITED: '服务意外退出，请手动重试。',
   REQUEST_TIMEOUT: '请求超时，服务已停止；请求不会自动重放。',
   SHUTTING_DOWN: '应用正在关闭。', BUSY: '请求过多，请稍后重试。',
+  STORAGE_UNAVAILABLE: '本地数据初始化失败，原有数据已保留。请检查数据目录后重试。',
 };
 export const publicError = (code: ErrorCode): PublicError => ({ code, message: messages[code] });
 export const emptySchema = z.strictObject({});
