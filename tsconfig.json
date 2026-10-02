@@ -6,8 +6,9 @@
     "lib": ["ES2022", "DOM"], "types": ["node"],
     "paths": {
       "@aiappnest/contracts": ["./packages/contracts/src/index.ts"],
-      "@aiappnest/domain": ["./packages/domain/src/index.ts"]
+      "@aiappnest/domain": ["./packages/domain/src/index.ts"],
+      "@aiappnest/storage": ["./packages/storage/src/index.ts"]
     }
   },
-  "include": ["apps/**/*.ts", "packages/**/*.ts"]
+  "include": ["apps/**/*.ts", "packages/**/*.ts", "tests/types/**/*.ts"]
 }

@@ -1,1 +1,1 @@
-{"name":"@aiappnest/storage","version":"0.0.0","private":true,"type":"module","exports":"./src/index.ts"}
+{"name":"@aiappnest/storage","version":"0.0.0","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@aiappnest/domain":"0.0.0","zod":"4.6.5"}}

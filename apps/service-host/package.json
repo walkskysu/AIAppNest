@@ -1,1 +1,1 @@
-{"name":"@aiappnest/service-host","version":"0.0.0","private":true,"type":"module","dependencies":{"@aiappnest/contracts":"0.0.0","@aiappnest/domain":"0.0.0"}}
+{"name":"@aiappnest/service-host","version":"0.0.0","private":true,"type":"module","dependencies":{"@aiappnest/contracts":"0.0.0","@aiappnest/domain":"0.0.0","@aiappnest/storage":"0.0.0"}}

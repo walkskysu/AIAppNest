@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
@@ -7,7 +7,9 @@ import { resolve, join } from 'node:path';
 import { ServiceManager, serviceEnvironment } from '../../dist/service-manager.cjs';
 
 const entry = resolve('dist/service-host.cjs');
-const options = { entry, nodePath: process.execPath, startupMs: 2000, requestMs: 300, shutdownMs: 100 };
+const dataRoot = await mkdtemp(resolve('.test-service-data-'));
+after(() => rm(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+const options = { entry, dataRoot, nodePath: process.execPath, startupMs: 2000, requestMs: 300, shutdownMs: 100 };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn) { for (let i = 0; i < 100; i++) { if (fn()) return; await wait(30); } throw new Error('Condition timed out'); }
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
