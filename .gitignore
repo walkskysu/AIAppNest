@@ -1,5 +1,6 @@
 # Logs
 spikes/pi-windows/.runs/
+.test-*/
 logs
 *.log
 npm-debug.log*

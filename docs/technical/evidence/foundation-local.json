@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-02",
+  "platform": "win32",
+  "architecture": "x64",
+  "node": "24.19.0",
+  "npm": "11.17.0",
+  "electron": "44.5.1",
+  "command": "npm.cmd test",
+  "exitCode": 1,
+  "typecheck": "PASS",
+  "productionBuild": "PASS",
+  "developmentBuild": "PASS",
+  "tests": { "total": 35, "pass": 30, "fail": 4, "skip": 1 },
+  "foundation": {
+    "realNodeServiceTests": { "pass": 7, "fail": 0 },
+    "realElectronTests": { "pass": 0, "fail": 4 },
+    "desktopFailureStage": "Electron native sandbox initialization before application window assertions",
+    "desktopFailure": "Sandboxed processes cannot read the Electron runtime directory: AppContainer ACL entry without ALL APPLICATION PACKAGES access"
+  },
+  "priorSpike": { "pass": 23, "fail": 0, "skip": 1, "skipReason": "CurrentUser DPAPI 0x80131430" },
+  "overall": "BLOCKED",
+  "subsequentHostVerification": {
+    "command": "npm.cmd test",
+    "configuredChecks": "PASS",
+    "evidence": "github_publish_pull_request passed checks and created local commit 0ba8bf2 before returning git push failure",
+    "perTestCounts": null,
+    "githubActions": "NOT_VERIFIED"
+  },
+  "notes": [
+    "Local results only; GitHub Actions has not been verified.",
+    "Electron sandbox remains enabled; no desktop tests were skipped or replaced by mocks.",
+    "Issue #1 real-model and DPAPI acceptance remains blocked."
+  ]
+}
