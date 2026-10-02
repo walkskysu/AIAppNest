@@ -1,14 +1,38 @@
 {
-  "name": "aiappnest-pi-windows-spike",
+  "name": "aiappnest",
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "engines": { "node": "24.19.0" },
+  "engines": {
+    "node": "24.19.0"
+  },
+  "packageManager": "npm@11.17.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "test": "node --test --test-concurrency=1 spikes/pi-windows/test/*.test.mjs",
+    "dev": "node scripts/build.mjs --dev && node scripts/launch.mjs",
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/launch.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && npm run build && node --test --test-concurrency=1 tests/integration/*.test.mjs spikes/pi-windows/test/*.test.mjs",
+    "test:foundation": "npm run typecheck && npm run build && node --test --test-concurrency=1 tests/integration/*.test.mjs",
     "spike:live": "node spikes/pi-windows/src/live.mjs",
     "spike:native": "node spikes/pi-windows/src/native-probe.mjs",
     "spike:environment": "node spikes/pi-windows/src/environment.mjs"
   },
-  "dependencies": { "@mariozechner/pi-coding-agent": "0.73.1" }
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "0.73.1",
+    "vue": "3.5.43",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.10.1",
+    "electron": "44.5.1",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3",
+    "vite": "8.3.2"
+  }
 }

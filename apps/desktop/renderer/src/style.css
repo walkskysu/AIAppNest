@@ -1,0 +1,27 @@
+:root { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #172033; background: #f5f6fa; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 960px; margin: 0 auto; padding: 32px 48px; }
+header { display: flex; justify-content: space-between; align-items: center; }
+.brand { font-size: 21px; font-weight: 700; letter-spacing: -.5px; }
+.tag { font-size: 12px; background: #e9edf6; padding: 6px 12px; border-radius: 20px; }
+.intro { margin: 48px 0 28px; }
+.eyebrow { color: #4963c6; font-size: 13px; font-weight: 600; }
+h1 { font-size: 32px; margin: 10px 0; letter-spacing: -1px; }
+p { color: #617086; line-height: 1.7; font-size: 14px; }
+h2 { font-size: 17px; margin: 0; }
+.card { padding: 26px 30px; background: white; border: 1px solid #e2e6ee; border-radius: 16px; box-shadow: 0 10px 28px #1b2b4b06; }
+.status-line { display: flex; align-items: center; gap: 10px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: #8c95a7; }
+.dot.ready { background: #219779; }
+.dot.failed { background: #d35451; }
+.dot.starting { background: #c79430; }
+.actions { display: flex; gap: 12px; margin-top: 24px; }
+button { border: 0; border-radius: 8px; background: #3854ba; color: white; padding: 11px 20px; font: inherit; font-size: 13px; cursor: pointer; }
+button.secondary { background: #edf0f7; color: #344568; }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible { outline: 3px solid #95a9f0; outline-offset: 3px; }
+.diagnostic { min-height: 24px; margin-bottom: 0; }
+.boundary { margin: 28px 0; padding: 0 4px; }
+.boundary h2 { font-size: 13px; margin-top: 20px; }
+@media (max-width: 700px) { main { padding: 24px; } h1 { font-size: 27px; } }
