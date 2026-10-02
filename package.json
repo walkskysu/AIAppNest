@@ -1,0 +1,14 @@
+{
+  "name": "aiappnest-pi-windows-spike",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": { "node": "24.19.0" },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 spikes/pi-windows/test/*.test.mjs",
+    "spike:live": "node spikes/pi-windows/src/live.mjs",
+    "spike:native": "node spikes/pi-windows/src/native-probe.mjs",
+    "spike:environment": "node spikes/pi-windows/src/environment.mjs"
+  },
+  "dependencies": { "@mariozechner/pi-coding-agent": "0.73.1" }
+}
