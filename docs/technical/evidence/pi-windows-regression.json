@@ -1,0 +1,305 @@
+{
+  "date": "2026-10-02",
+  "environment": {
+    "node": "v24.19.0",
+    "nodeAbi": "137",
+    "sqlite": "3.53.3",
+    "pi": "0.73.1",
+    "cli": "node_modules/@mariozechner/pi-coding-agent/dist/cli.js",
+    "platform": "win32",
+    "arch": "x64",
+    "windows": "Windows 11 Home China",
+    "build": "10.0.26200",
+    "cpu": "AMD Ryzen 9 8945H w/ Radeon 780M Graphics",
+    "logicalProcessors": 16,
+    "memoryGiB": 31,
+    "adapter": "spike-v1",
+    "providerFixture": "deterministic-v1"
+  },
+  "packageLockSha256": "ac254dd7feb3a1b394247252e767ef97a77f454db7559089df28e90a8e0f9bd1",
+  "kind": "real-pi-deterministic-provider-not-real-model",
+  "exitCode": 0,
+  "tests": [
+    "ok 1 - V05 JSONL survives every byte split, Unicode, CRLF, and multiple frames",
+    "ok 2 - V05 malformed, invalid UTF-8, oversized and truncated frames fail closed",
+    "ok 3 - V05 responses correlate by id while uncorrelated events interleave; no raw secrets in audit",
+    "ok 4 - V06 accepted prompt cannot complete without terminal evidence; timeout retires worker",
+    "ok 5 - V06 process exit rejects pending command",
+    "ok 6 - Windows runtime lock and CRT argument round trip",
+    "ok 7 - V02/V07 exact save and restore: 中文",
+    "ok 8 - V02/V07 exact save and restore: with space",
+    "ok 9 - V02/V07 exact save and restore: 中文 空格",
+    "ok 10 - V03/V04/V11/V12 concurrent apps, same-name skill, resources, environment",
+    "ok 11 - V06 handled, model failure, tool failure, successful run and error exit",
+    "ok 12 - V08 bad, missing, relative, directory and cross-session paths fail before spawn",
+    "ok 13 - V08 exclusively locked session fails instead of silently creating another",
+    "ok 14 - V10 tool entry denies before side effects; traversal, junction and built-in bypass",
+    "ok 15 - V09 abort cooperative clears actual tool child",
+    "ok 16 - V09 abort timeout force clears actual tool child",
+    "ok 17 - V09 host crash kills only its Job descendants; unrelated process survives",
+    "ok 18 - V09 normal shutdown escalates for a stubborn tool and clears descendants",
+    "ok 19 - V13 DPAPI ciphertext persistence (environment prerequisite) # SKIP BLOCKED: CurrentUser DPAPI 0x80131430; run npm run spike:native with a normal Windows user token",
+    "ok 20 - V13 Node SQLite basic read/write",
+    "# tests 20",
+    "# pass 19",
+    "# fail 0",
+    "# cancelled 0",
+    "# skipped 1",
+    "# todo 0"
+  ],
+  "native": {
+    "dpapi": "BLOCKED",
+    "sqlite": "PASS"
+  },
+  "traces": {
+    "success": {
+      "status": "succeeded",
+      "events": [
+        {
+          "seq": 3,
+          "type": "response",
+          "success": true,
+          "command": "prompt"
+        },
+        {
+          "seq": 4,
+          "type": "agent_start"
+        },
+        {
+          "seq": 5,
+          "type": "turn_start"
+        },
+        {
+          "seq": 6,
+          "type": "message_start"
+        },
+        {
+          "seq": 7,
+          "type": "message_end"
+        },
+        {
+          "seq": 8,
+          "type": "message_start"
+        },
+        {
+          "seq": 9,
+          "type": "message_end"
+        },
+        {
+          "seq": 10,
+          "type": "turn_end"
+        },
+        {
+          "seq": 11,
+          "type": "agent_end"
+        },
+        {
+          "seq": 12,
+          "type": "response",
+          "success": true,
+          "command": "prompt"
+        },
+        {
+          "seq": 13,
+          "type": "response",
+          "success": true,
+          "command": "get_state"
+        },
+        {
+          "seq": 14,
+          "type": "response",
+          "success": true,
+          "command": "get_messages"
+        }
+      ]
+    },
+    "handled": {
+      "status": "handled",
+      "events": [
+        {
+          "seq": 15,
+          "type": "extension_ui_request"
+        },
+        {
+          "seq": 16,
+          "type": "response",
+          "success": true,
+          "command": "prompt"
+        },
+        {
+          "seq": 17,
+          "type": "response",
+          "success": true,
+          "command": "prompt"
+        },
+        {
+          "seq": 18,
+          "type": "response",
+          "success": true,
+          "command": "get_state"
+        },
+        {
+          "seq": 19,
+          "type": "response",
+          "success": true,
+          "command": "get_messages"
+        }
+      ]
+    },
+    "modelFailure": {
+      "status": "failed",
+      "events": [
+        {
+          "seq": 20,
+          "type": "response",
+          "success": true,
+          "command": "prompt"
+        },
+        {
+          "seq": 21,
+          "type": "agent_start"
+        },
+        {
+          "seq": 22,
+          "type": "turn_start"
+        },
+        {
+          "seq": 23,
+          "type": "message_start"
+        },
+        {
+          "seq": 24,
+          "type": "message_end"
+        },
+        {
+          "seq": 25,
+          "type": "message_start"
+        },
+        {
+          "seq": 26,
+          "type": "message_end"
+        },
+        {
+          "seq": 27,
+          "type": "turn_end"
+        },
+        {
+          "seq": 28,
+          "type": "agent_end"
+        },
+        {
+          "seq": 29,
+          "type": "response",
+          "success": true,
+          "command": "prompt"
+        },
+        {
+          "seq": 30,
+          "type": "response",
+          "success": true,
+          "command": "get_state"
+        },
+        {
+          "seq": 31,
+          "type": "response",
+          "success": true,
+          "command": "get_messages"
+        }
+      ]
+    },
+    "toolDenial": {
+      "status": "failed",
+      "events": [
+        {
+          "seq": 32,
+          "type": "response",
+          "success": true,
+          "command": "prompt"
+        },
+        {
+          "seq": 33,
+          "type": "agent_start"
+        },
+        {
+          "seq": 34,
+          "type": "turn_start"
+        },
+        {
+          "seq": 35,
+          "type": "message_start"
+        },
+        {
+          "seq": 36,
+          "type": "message_end"
+        },
+        {
+          "seq": 37,
+          "type": "message_start"
+        },
+        {
+          "seq": 38,
+          "type": "message_end"
+        },
+        {
+          "seq": 39,
+          "type": "tool_execution_start"
+        },
+        {
+          "seq": 40,
+          "type": "tool_execution_end"
+        },
+        {
+          "seq": 41,
+          "type": "message_start"
+        },
+        {
+          "seq": 42,
+          "type": "message_end"
+        },
+        {
+          "seq": 43,
+          "type": "turn_end"
+        },
+        {
+          "seq": 44,
+          "type": "turn_start"
+        },
+        {
+          "seq": 45,
+          "type": "message_start"
+        },
+        {
+          "seq": 46,
+          "type": "message_end"
+        },
+        {
+          "seq": 47,
+          "type": "turn_end"
+        },
+        {
+          "seq": 48,
+          "type": "agent_end"
+        },
+        {
+          "seq": 49,
+          "type": "response",
+          "success": true,
+          "command": "prompt"
+        },
+        {
+          "seq": 50,
+          "type": "response",
+          "success": true,
+          "command": "get_state"
+        },
+        {
+          "seq": 51,
+          "type": "response",
+          "success": true,
+          "command": "get_messages"
+        }
+      ]
+    }
+  },
+  "gate": "BLOCKED_PENDING_REAL_MODEL_AND_NATIVE_ACCEPTANCE"
+}

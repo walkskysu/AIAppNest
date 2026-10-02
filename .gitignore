@@ -1,4 +1,5 @@
 # Logs
+spikes/pi-windows/.runs/
 logs
 *.log
 npm-debug.log*
