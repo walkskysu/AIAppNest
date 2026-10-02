@@ -32,7 +32,7 @@ createApp(defineComponent({
     };
     return () => h('main', [
       h('header', [h('span', { class: 'brand' }, 'AIAppNest'), h('span', { class: 'tag' }, '基础工程')]),
-      h('section', { class: 'intro' }, [h('p', { class: 'eyebrow' }, '本地 AI 应用工作台'), h('h1', '从可靠的连接开始'), h('p', '桌面与独立服务已连接，后续能力将在这里逐步接入。')]),
+      h('section', { class: 'intro' }, [h('p', { class: 'eyebrow' }, '本地 AI 应用工作台'), h('h1', '从可靠的连接开始'), h('p', '查看独立服务状态，后续能力将在这里逐步接入。')]),
       h('section', { class: 'card' }, [
         h('div', { class: 'status-line' }, [h('span', { class: `dot ${status.value.phase}` }), h('h2', { 'data-testid': 'phase', 'data-phase': status.value.phase, role: 'status' }, names[status.value.phase])]),
         h('p', status.value.error?.message ?? '通过受控进程通信管理服务，不开放本地网络端口。'),

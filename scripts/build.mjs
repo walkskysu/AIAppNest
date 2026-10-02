@@ -1,12 +1,18 @@
 import { build } from 'esbuild';
 import { build as buildRenderer } from 'vite';
-import { mkdir, copyFile, writeFile } from 'node:fs/promises';
+import { mkdir, copyFile, writeFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 if (process.versions.node !== '24.19.0') throw new Error('Build requires the pinned Node 24.19.0 sidecar runtime.');
 const dev = process.argv.includes('--dev');
 const outdir = resolve(process.argv.find((arg) => arg.startsWith('--out-dir='))?.slice(10) ?? 'dist');
 await mkdir(resolve(outdir, 'runtime'), { recursive: true });
+// esbuild does not remove maps left by an earlier development build.
+if (!dev) {
+  for (const name of ['main', 'preload', 'service-host', 'service-manager']) {
+    await rm(resolve(outdir, `${name}.cjs.map`), { force: true });
+  }
+}
 await copyFile(process.execPath, resolve(outdir, 'runtime', process.platform === 'win32' ? 'node.exe' : 'node'));
 const common = { bundle: true, platform: 'node', target: 'node24', format: 'cjs', sourcemap: dev, external: ['electron'], logLevel: 'warning' };
 await build({ ...common, entryPoints: ['apps/desktop/src/main.ts'], outfile: `${outdir}/main.cjs`, define: { __DEV__: String(dev) } });

@@ -14,6 +14,8 @@ Electron 44.5.1 的启动错误为：`Sandboxed processes cannot read ... node_m
 
 ## 托管 Windows 最终验证
 
+本次恢复复核补充：修复同一输出目录先开发、后生产构建时遗留 Main/preload/Service Host source map 的问题，新增 `build.test.mjs` 验证所有 map 和 sourceMappingURL 被清除；界面介绍文字不再在服务失败时宣称已连接。受限 shell 重新执行 `npm.cmd test`：36 项，31 PASS、4 FAIL、1 SKIP；新增构建回归通过，4 项 Electron 启动失败仍为上述 ACL 原因，DPAPI 仍因受限令牌跳过。下述托管成功记录来自此前提交，不替代新增修改的宿主发布检查。
+
 宿主提供的发布工具最终通过配置的完整 `npm.cmd test`，随后创建提交 `0ba8bf2`，进入 Git 推送步骤。该环境可启动真实 Electron；测试没有禁用 sandbox，已有 DPAPI 回归也在宿主环境通过。最终调用没有回传逐条 TAP 计数，因此保留受限 shell 的原始计数，不将其改写为成功记录。下表记录最终托管验收结果；GitHub Actions 与发布成功状态独立于本地托管检查。
 
 ## 验收矩阵
