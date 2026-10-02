@@ -19,6 +19,13 @@
   },
   "priorSpike": { "pass": 23, "fail": 0, "skip": 1, "skipReason": "CurrentUser DPAPI 0x80131430" },
   "overall": "BLOCKED",
+  "subsequentHostVerification": {
+    "command": "npm.cmd test",
+    "configuredChecks": "PASS",
+    "evidence": "github_publish_pull_request passed checks and created local commit 0ba8bf2 before returning git push failure",
+    "perTestCounts": null,
+    "githubActions": "NOT_VERIFIED"
+  },
   "notes": [
     "Local results only; GitHub Actions has not been verified.",
     "Electron sandbox remains enabled; no desktop tests were skipped or replaced by mocks.",

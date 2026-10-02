@@ -32,6 +32,6 @@ npm.cmd test        # 类型检查、生产构建、真实进程测试及已有 
 
 详见[架构边界](docs/technical/foundation-architecture.md)和[F01–F14 验证记录](docs/technical/foundation-validation.md)。
 
-**当前验证限制：**前置 [Pi Spike 报告](docs/technical/pi-windows-spike-report.md)仍为 BLOCKED（真实模型与 DPAPI 验收未完成）。本次执行环境还因 Windows 运行时目录 ACL 阻止 Electron 创建沙箱进程，桌面集成验证尚未通过。没有关闭沙箱、跳过桌面测试或以模拟结果替代验收。请以验证记录及 CI 实际结果为准。
+**验证状态：**托管 Windows 环境的完整 `npm.cmd test` 已通过，包含真实 Electron 和 Node 的安全与生命周期验证。受限 shell 的 Electron sandbox ACL 失败记录仍保留；没有关闭沙箱或以模拟结果替代桌面验收。前置 [Pi Spike 报告](docs/technical/pi-windows-spike-report.md)的真实模型验收仍未完成；本次托管环境的 DPAPI 回归通过不代表此前全部验收门禁解除。GitHub Actions 结果须以远端实际执行为准。
 
 发行安装包、签名、自动更新不在本次范围；`dist` 是本机运行的构建目录，不是可分发安装包。已有 Pi 验证入口保留于 [spikes/pi-windows](spikes/pi-windows/README.md)。
