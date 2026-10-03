@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, cp, rm, rename, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
+import { createServer } from 'node:http';
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -28,6 +29,58 @@ async function launch(t, root = resolve('dist')) {
 }
 async function ready(page) { await page.waitForFunction(() => document.querySelector('[data-testid="phase"]')?.getAttribute('data-phase') === 'ready'); }
 
+test('P17 production settings: manual save/probe, revision invalidation and transient key clearing', { timeout: 60000 }, async t => {
+  let requests = 0;
+  const authorization = [];
+  const server = createServer(async (req, res) => {
+    for await (const _ of req) { /* consume */ }
+    requests++;
+    authorization.push(req.headers.authorization);
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const { page } = await launch(t); await ready(page);
+  await page.getByRole('button', { name: '模型设置', exact: true }).click();
+  await page.getByLabel('显示名称').fill('Local UI test');
+  await page.getByLabel('协议', { exact: true }).selectOption('local-openai');
+  await page.getByLabel('端点', { exact: true }).fill(`http://127.0.0.1:${server.address().port}/v1`);
+  await page.getByLabel('模型 ID', { exact: true }).fill('test-model');
+  assert.equal(requests, 0);
+  await page.getByRole('button', { name: '保存模型', exact: true }).click();
+  await page.getByTestId('provider-feedback').filter({ hasText: '已保存' }).waitFor();
+  assert.equal(requests, 0);
+  await page.getByRole('button', { name: '测试模型连接', exact: true }).click();
+  await page.getByTestId('provider-result').filter({ hasText: '连接成功' }).waitFor();
+  assert.equal(requests, 1);
+  await page.getByLabel('模型 ID', { exact: true }).fill('edited-model');
+  assert.equal(await page.getByTestId('provider-result').count(), 0);
+  assert.equal(await page.getByRole('button', { name: '测试模型连接', exact: true }).isDisabled(), true);
+  await page.getByLabel('认证方式', { exact: true }).selectOption('api-key');
+  await page.getByLabel('API Key', { exact: true }).fill('transient-ui-test-key');
+  // Invalid request must still clear the password immediately and never touch browser storage.
+  await page.getByLabel('模型 ID', { exact: true }).fill('');
+  await page.getByRole('button', { name: '保存模型', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('input[type=password]')?.value === '');
+  assert.deepEqual(await page.evaluate(() => [localStorage.length, sessionStorage.length]), [0, 0]);
+  await page.getByTestId('provider-feedback').filter({ hasText: '请求格式无效' }).waitFor();
+  await page.getByLabel('模型 ID', { exact: true }).fill('edited-model');
+  await page.getByLabel('API Key', { exact: true }).fill('saved-ui-test-key');
+  await page.getByRole('button', { name: '保存模型', exact: true }).click();
+  await page.getByTestId('provider-feedback').filter({ hasText: '已保存' }).waitFor();
+  assert.equal(await page.getByLabel('API Key', { exact: true }).inputValue(), '');
+  await page.getByRole('button', { name: '测试模型连接', exact: true }).click();
+  await page.getByTestId('provider-result').filter({ hasText: '连接成功' }).waitFor();
+  assert.deepEqual(authorization, [undefined, 'Bearer saved-ui-test-key']);
+  await page.getByLabel('API Key', { exact: true }).fill('leave-page-test-key');
+  await page.getByRole('button', { name: '关闭模型设置', exact: true }).click();
+  await page.getByRole('button', { name: '模型设置', exact: true }).click();
+  assert.equal(await page.getByLabel('API Key', { exact: true }).inputValue(), '');
+  assert.equal(requests, 2);
+  assert.equal((await page.evaluate(() => window.desktop.providers({ operation: 'readCredential' }))).error.code, 'INVALID_INPUT');
+});
+
 test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload and single instance', { timeout: 60000 }, async (t) => {
   const { app, page, profile } = await launch(t); await ready(page);
   await page.getByRole('button', { name: '检查连接' }).click();
@@ -35,7 +88,7 @@ test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload 
   const initial = await page.evaluate(() => window.desktop.getStatus());
   const pid = initial.value.pid;
   const surface = await page.evaluate(() => ({ keys: Object.keys(window.desktop).sort(), require: typeof window.require, process: typeof window.process, ipc: typeof window.ipcRenderer }));
-  assert.deepEqual(surface, { keys: ['getStatus', 'onStatusChanged', 'ping', 'retryService'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
+  assert.deepEqual(surface, { keys: ['getStatus', 'onStatusChanged', 'ping', 'providers', 'retryService'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
   const prefs = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences());
   for (const key of ['sandbox', 'contextIsolation', 'webSecurity']) assert.equal(prefs[key], true);
   for (const key of ['nodeIntegration', 'nodeIntegrationInWorker', 'nodeIntegrationInSubFrames', 'webviewTag', 'allowRunningInsecureContent']) assert.equal(prefs[key], false, key);

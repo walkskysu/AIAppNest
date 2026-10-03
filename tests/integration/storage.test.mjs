@@ -23,7 +23,7 @@ function fixture(t) {
   return { root, storage, raw };
 }
 function seed(storage) {
-  const provider = storage.providers.insert({ id: uuid(), provider: 'fixture', endpoint: 'https://example.invalid/v1', secretRef: `secret:${uuid()}`, settings: { timeoutMs: 3000 }, createdAt: now });
+  const provider = storage.providers.insert({ id: uuid(), name: 'fixture', providerType: 'fixture', modelId: 'fixture', authMode: 'api-key', revision: 1, endpoint: 'https://example.invalid/v1', secretRef: `secret:${uuid()}`, settings: { timeoutMs: 3000 }, createdAt: now, updatedAt: now });
   const app = storage.apps.insert({ id: uuid(), name: "中文应用 '; DROP TABLE apps;--", description: '', icon: null, status: 'draft', currentRevisionId: null, version: 1, createdAt: now, updatedAt: now });
   const skillId = uuid();
   const skill = storage.skills.insert({ id: skillId, version: '1.0.0', hash: 'a'.repeat(64), sourcePath: `skills/${skillId}/1.0.0`, metadata: { name: 'same-name', description: '' }, importedAt: now });
@@ -39,7 +39,7 @@ function seed(storage) {
 test('S01 fresh initialization, verified connection settings, core round trips and restart persistence', t => {
   const { storage, root, raw } = fixture(t); const a = seed(storage);
   assert.deepEqual(storage.settings(), { foreignKeys: 1, journalMode: 'wal', busyTimeout: 3000, synchronous: 2 });
-  assert.equal(raw.prepare('SELECT count(*) AS n FROM schema_migrations').get().n,1);
+  assert.equal(raw.prepare('SELECT count(*) AS n FROM schema_migrations').get().n,migrations.length);
   assert.equal(storage.apps.get({ id: a.app.id }).name,a.app.name);
   assert.deepEqual(storage.revisions.get({ id: a.revision.id, appId: a.app.id }),a.revision);
   assert.deepEqual(storage.providers.get({ id: a.provider.id }),a.provider);
@@ -57,20 +57,20 @@ test('S01 fresh initialization, verified connection settings, core round trips a
 
 test('S02 migration upgrade is transactional, ordered, recorded and idempotent', t => {
   const { storage, raw } = fixture(t); seed(storage);
-  const steps = [...migrations,{ version: 2, name: 'test-upgrade', sql: 'CREATE TABLE upgrade_marker (id INTEGER PRIMARY KEY) STRICT;' }];
+  const steps = [...migrations,{ version: migrations.length + 1, name: 'test-upgrade', sql: 'CREATE TABLE upgrade_marker (id INTEGER PRIMARY KEY) STRICT;' }];
   migrate(raw,steps); migrate(raw,steps);
-  assert.equal(raw.prepare('SELECT count(*) AS n FROM schema_migrations').get().n,2);
+  assert.equal(raw.prepare('SELECT count(*) AS n FROM schema_migrations').get().n,migrations.length + 1);
   assert.equal(raw.prepare('SELECT count(*) AS n FROM apps').get().n,1);
   assert.equal(raw.prepare('PRAGMA foreign_key_check').all().length,0);
 });
 
 test('S03 migration failure/history drift/future schema/corrupt files fail without destructive rebuild', t => {
   const { storage, root, raw } = fixture(t); const a = seed(storage);
-  assert.throws(() => migrate(raw,[...migrations,{ version: 2, name: 'broken', sql: 'CREATE TABLE partial (id INTEGER); INSERT INTO missing VALUES(1);' }]));
+  assert.throws(() => migrate(raw,[...migrations,{ version: migrations.length + 1, name: 'broken', sql: 'CREATE TABLE partial (id INTEGER); INSERT INTO missing VALUES(1);' }]));
   assert.equal(raw.prepare("SELECT name FROM sqlite_master WHERE name='partial'").get(),undefined);
-  assert.equal(raw.prepare('SELECT count(*) AS n FROM schema_migrations').get().n,1);
+  assert.equal(raw.prepare('SELECT count(*) AS n FROM schema_migrations').get().n,migrations.length);
   fails(() => migrate(raw,[{ ...migrations[0], sql: `${migrations[0].sql} -- changed` }]),'STORAGE_UNAVAILABLE');
-  raw.prepare('INSERT INTO schema_migrations VALUES(2,?,?,?)').run('future','checksum',now);
+  raw.prepare('INSERT INTO schema_migrations VALUES(?,?,?,?)').run(migrations.length + 1,'future','checksum',now);
   fails(() => new Storage(root),'STORAGE_UNAVAILABLE');
   assert.equal(storage.apps.get({ id: a.app.id }).name,a.app.name);
   const brokenRoot = join(root,'broken'); mkdirSync(join(brokenRoot,'data'),{ recursive: true });

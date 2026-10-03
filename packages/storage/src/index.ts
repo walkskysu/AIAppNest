@@ -73,6 +73,29 @@ export class Storage {
     this.grants = make<Grant, Key<Grant,'id'|'appId'>, AppScope>('grants', schemas.grants, ['id','appId'], ['appId'], 'createdAt,id');
   }
 
+  saveProvider(value: ProviderProfile, expectedRevision?: number): ProviderProfile {
+    return this.transaction(() => {
+      if (!schemas.providers.safeParse(value).success) throw new DomainError('INVALID_INPUT');
+      if (expectedRevision === undefined) {
+        if (value.revision !== 1) throw new DomainError('VERSION_CONFLICT');
+        return this.providers.insert(value);
+      }
+      const old = this.providers.get({ id: value.id });
+      if (old.revision !== expectedRevision || value.revision !== expectedRevision + 1 || value.createdAt !== old.createdAt) throw new DomainError('VERSION_CONFLICT');
+      this.db.prepare('UPDATE provider_profiles SET name=?,providerType=?,endpoint=?,modelId=?,authMode=?,secretRef=?,settings=?,revision=?,updatedAt=? WHERE id=? AND revision=?')
+        .run(value.name,value.providerType,value.endpoint,value.modelId,value.authMode,value.secretRef,JSON.stringify(value.settings),value.revision,value.updatedAt,value.id,expectedRevision);
+      return this.providers.get({ id: value.id });
+    });
+  }
+  deleteProvider(providerId: ProviderProfile['id'], revision: number): void {
+    this.transaction(() => {
+      if (this.providers.get({ id: providerId }).revision !== revision) throw new DomainError('VERSION_CONFLICT');
+      this.db.prepare('DELETE FROM provider_profiles WHERE id=?').run(providerId);
+    });
+  }
+  providerSecretRefs(): Set<string> {
+    return guard(() => new Set(this.db.prepare('SELECT secretRef FROM provider_profiles WHERE secretRef IS NOT NULL').all().map(row => row.secretRef as string)));
+  }
   /** Synchronous only. Nested operations use savepoints; never await inside this callback. */
   transaction<T>(action: () => T extends PromiseLike<unknown> ? never : T): T {
     return guard(() => {

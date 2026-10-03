@@ -58,6 +58,7 @@ if (!app.requestSingleInstanceLock()) {
     handle(channels.status, (raw): Result<ServiceStatus> => emptySchema.safeParse(raw).success ? { ok: true, value: service!.snapshot() } : { ok: false, error: publicError('INVALID_INPUT') });
     handle(channels.retry, (raw) => emptySchema.safeParse(raw).success ? service!.start() : { ok: false, error: publicError('INVALID_INPUT') });
     handle(channels.ping, (raw) => service!.ping(raw));
+    handle(channels.providers, (raw) => service!.providers(raw));
     window = new BrowserWindow({ width: 1000, height: 720, minWidth: 640, minHeight: 480, backgroundColor: '#f5f6fa', show: false,
       webPreferences: { preload: join(root, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false, webSecurity: true, allowRunningInsecureContent: false, webviewTag: false, devTools: __DEV__ },
     });

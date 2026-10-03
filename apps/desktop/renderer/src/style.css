@@ -25,3 +25,9 @@ button:focus-visible { outline: 3px solid #95a9f0; outline-offset: 3px; }
 .boundary { margin: 28px 0; padding: 0 4px; }
 .boundary h2 { font-size: 13px; margin-top: 20px; }
 @media (max-width: 700px) { main { padding: 24px; } h1 { font-size: 27px; } }
+fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.provider-settings label { display: grid; gap: 6px; margin: 16px 0; font-weight: 600; }
+.provider-settings input, .provider-settings select { width: 100%; padding: 10px; border: 1px solid #c6ccdb; border-radius: 6px; background: white; color: #1c2438; font: inherit; box-sizing: border-box; }
+.provider-list { list-style: none; padding: 0; display: grid; gap: 8px; }
+.provider-list button { text-align: left; overflow-wrap: anywhere; }
+.provider-settings .actions { flex-wrap: wrap; }

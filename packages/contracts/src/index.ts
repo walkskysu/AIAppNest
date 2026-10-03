@@ -1,14 +1,20 @@
 import { z } from 'zod';
 import { SERVICE_PROTOCOL_VERSION } from '@aiappnest/domain';
+import { providerRequestSchema, providerReplySchema, type ProviderRequest, type ProviderReply } from './providers';
+export * from './providers';
 
 export const errorCodeSchema = z.enum([
   'INVALID_INPUT', 'FORBIDDEN', 'NOT_READY', 'START_FAILED', 'START_TIMEOUT',
   'PROTOCOL_ERROR', 'SERVICE_EXITED', 'REQUEST_TIMEOUT', 'SHUTTING_DOWN', 'BUSY', 'STORAGE_UNAVAILABLE',
+  'VERSION_CONFLICT', 'NOT_FOUND', 'CREDENTIAL_UNAVAILABLE', 'PROVIDER_IN_USE',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const errorSchema = z.strictObject({ code: errorCodeSchema, message: z.string().max(200) });
 export type PublicError = z.infer<typeof errorSchema>;
 const messages: Record<ErrorCode, string> = {
+  VERSION_CONFLICT: '配置已发生变化，请重新加载后再操作。', NOT_FOUND: '模型配置不存在。',
+  CREDENTIAL_UNAVAILABLE: '凭据无法保存或读取，请检查 Windows 用户环境并重新输入。',
+  PROVIDER_IN_USE: '此模型配置被应用版本引用，无法删除。',
   INVALID_INPUT: '请求格式无效。', FORBIDDEN: '请求来源不被允许。', NOT_READY: '服务尚未就绪。',
   START_FAILED: '服务启动失败，请检查运行时后重试。', START_TIMEOUT: '服务启动握手超时。',
   PROTOCOL_ERROR: '服务通信协议不匹配。', SERVICE_EXITED: '服务意外退出，请手动重试。',
@@ -35,21 +41,24 @@ export const resultSchema = <T extends z.ZodType>(value: T) => z.discriminatedUn
   z.strictObject({ ok: z.literal(true), value }),
   z.strictObject({ ok: z.literal(false), error: errorSchema }),
 ]);
-export const channels = Object.freeze({ status: 'foundation:status', retry: 'foundation:retry', ping: 'foundation:ping', changed: 'foundation:changed' });
+export const channels = Object.freeze({ status: 'foundation:status', retry: 'foundation:retry', ping: 'foundation:ping', changed: 'foundation:changed', providers: 'providers:request' });
 const id = z.uuid();
 export const hostInputSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('hello'), version: z.literal(SERVICE_PROTOCOL_VERSION), nonce: id }),
   z.strictObject({ kind: z.literal('ping'), id, input: pingInputSchema }),
+  z.strictObject({ kind: z.literal('providers'), id, input: providerRequestSchema }),
   z.strictObject({ kind: z.literal('shutdown') }),
 ]);
 export const hostOutputSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('ready'), version: z.literal(SERVICE_PROTOCOL_VERSION), nonce: id, pid: z.number().int().positive(), nodeVersion: z.string().max(30) }),
   z.strictObject({ kind: z.literal('response'), id, result: resultSchema(pingOutputSchema) }),
+  z.strictObject({ kind: z.literal('providers-response'), id, result: resultSchema(providerReplySchema) }),
   z.strictObject({ kind: z.literal('fatal'), error: errorSchema }),
 ]);
 export type HostInput = z.infer<typeof hostInputSchema>;
 export type HostOutput = z.infer<typeof hostOutputSchema>;
 export interface DesktopAPI {
+  providers(input: ProviderRequest): Promise<Result<ProviderReply>>;
   getStatus(): Promise<Result<ServiceStatus>>;
   retryService(): Promise<Result<ServiceStatus>>;
   ping(input: PingInput): Promise<Result<PingOutput>>;

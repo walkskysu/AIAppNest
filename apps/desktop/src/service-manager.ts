@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { hostOutputSchema, pingInputSchema, publicError, type ErrorCode, type HostInput, type PingOutput, type Result, type ServiceStatus } from '@aiappnest/contracts';
 import { SERVICE_NODE_VERSION, SERVICE_PROTOCOL_VERSION } from '@aiappnest/domain';
+import { providerRequestSchema, type ProviderReply, type ProviderRequest } from '@aiappnest/contracts';
 
-type Pending = { resolve: (result: Result<PingOutput>) => void; timer: NodeJS.Timeout };
+type Pending = { kind: 'response' | 'providers-response'; operation?: ProviderRequest['operation']; resolve: (result: Result<PingOutput | ProviderReply>) => void; timer: NodeJS.Timeout };
 export function serviceEnvironment(dataRoot?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'LANG', 'LOCALAPPDATA']) {
@@ -82,9 +83,10 @@ export class ServiceManager extends EventEmitter {
           if (this.status.phase !== 'starting' || message.nonce !== this.nonce || message.pid !== child.pid || message.nodeVersion !== SERVICE_NODE_VERSION) { this.fail('PROTOCOL_ERROR'); return; }
           this.transition('ready');
           this.settleStart({ ok: true, value: this.snapshot() });
-        } else if (message.kind === 'response') {
+        } else if (message.kind === 'response' || message.kind === 'providers-response') {
           const pending = this.pending.get(message.id);
-          if (this.status.phase !== 'ready' || !pending) { this.fail('PROTOCOL_ERROR'); return; }
+          if (this.status.phase !== 'ready' || !pending || pending.kind !== message.kind) { this.fail('PROTOCOL_ERROR'); return; }
+          if (message.kind === 'providers-response' && message.result.ok && pending.operation !== message.result.value.operation) { this.fail('PROTOCOL_ERROR'); return; }
           clearTimeout(pending.timer);
           this.pending.delete(message.id);
           pending.resolve(message.result);
@@ -107,8 +109,20 @@ export class ServiceManager extends EventEmitter {
     return new Promise((resolve) => {
       const id = randomUUID();
       const timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 3000);
-      this.pending.set(id, { resolve, timer });
+      this.pending.set(id, { kind: 'response', resolve: result => resolve(result as Result<PingOutput>), timer });
       this.send({ kind: 'ping', id, input: parsed.data });
+    });
+  }
+  providers(input: unknown): Promise<Result<ProviderReply>> {
+    const parsed = providerRequestSchema.safeParse(input);
+    if (!parsed.success) return Promise.resolve({ ok: false, error: publicError('INVALID_INPUT') });
+    if (this.status.phase !== 'ready') return Promise.resolve({ ok: false, error: publicError(this.closing ? 'SHUTTING_DOWN' : 'NOT_READY') });
+    if (this.pending.size >= 64) return Promise.resolve({ ok: false, error: publicError('BUSY') });
+    return new Promise(resolve => {
+      const id = randomUUID();
+      const timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 75000);
+      this.pending.set(id, { kind: 'providers-response', operation: parsed.data.operation, resolve: result => resolve(result as Result<ProviderReply>), timer });
+      this.send({ kind: 'providers', id, input: parsed.data });
     });
   }
   stop(): Promise<void> {

@@ -25,6 +25,8 @@ export const schemas = {
   memories: z.strictObject({ id, appId, version, type: z.enum(['preference','fact','convention','term']), content: text, status: z.enum(['candidate','active','conflict','disabled','deleted']), confidence: z.number().min(0).max(1).nullable(), sourceConversationId: uuid.nullable(), sourceRunId: uuid.nullable(), sourceMessageId: uuid.nullable(), createdAt: time, updatedAt: time, expiresAt: time.nullable() }),
   memoryLinks: z.strictObject({ runId: uuid, appId, memoryId: uuid, memoryVersion: version, injectedTextHash: hash }),
   artifacts: z.strictObject({ id, appId, conversationId: uuid, runId: uuid, relativePath: text, mimeType: text, size: z.number().int().nonnegative(), hash, createdAt: time }),
-  providers: z.strictObject({ id, provider: text, endpoint: z.url().refine(value => { const url = new URL(value); return ['http:','https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash; }), secretRef: z.string().regex(/^secret:[0-9a-f-]{36}$/).nullable(), settings: z.strictObject({ timeoutMs: z.number().int().positive() }), createdAt: time }),
+  providers: z.strictObject({ id, name: text.min(1).max(80), providerType: text.max(100), modelId: text.max(128), authMode: z.enum(['api-key','none']), revision: version,
+    endpoint: z.url().refine(value => { if (!URL.canParse(value)) return false; const url = new URL(value); return ['http:','https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash; }),
+    secretRef: z.string().regex(/^secret:[0-9a-f-]{36}$/).nullable(), settings: z.strictObject({ timeoutMs: z.number().int().positive() }), createdAt: time, updatedAt: time }),
   grants: z.strictObject({ id, appId, capability: text, resource: text, mode: z.enum(['read','write','execute']), createdAt: time }),
 };

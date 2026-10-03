@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { channels, pingInputSchema, pingOutputSchema, publicError, resultSchema, statusSchema, type DesktopAPI, type ServiceStatus } from '@aiappnest/contracts';
+import { providerRequestSchema, providerReplySchema } from '@aiappnest/contracts';
 
 const callbacks = new Set<(status: ServiceStatus) => void>();
 // One native listener per document, regardless of Vue component subscription count.
@@ -10,6 +11,13 @@ const listener = (_event: unknown, raw: unknown) => {
 ipcRenderer.on(channels.changed, listener);
 window.addEventListener('unload', () => { callbacks.clear(); ipcRenderer.removeListener(channels.changed, listener); });
 const api: DesktopAPI = {
+  providers: async input => {
+    const parsed = providerRequestSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, error: publicError('INVALID_INPUT') };
+    const raw = await ipcRenderer.invoke(channels.providers, parsed.data);
+    const reply = resultSchema(providerReplySchema).safeParse(raw);
+    return reply.success ? reply.data : { ok: false, error: publicError('PROTOCOL_ERROR') };
+  },
   getStatus: async () => resultSchema(statusSchema).parse(await ipcRenderer.invoke(channels.status, {})),
   retryService: async () => resultSchema(statusSchema).parse(await ipcRenderer.invoke(channels.retry, {})),
   ping: async (input) => {

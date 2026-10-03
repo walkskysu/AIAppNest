@@ -145,6 +145,17 @@ END;
 CREATE TRIGGER event_sequence BEFORE INSERT ON run_events
  WHEN NEW.seq!=coalesce((SELECT max(seq)+1 FROM run_events WHERE runId=NEW.runId),1)
  BEGIN SELECT RAISE(ABORT, 'version conflict'); END;
+` }, { version: 2, name: 'provider-configuration', sql: `
+ALTER TABLE provider_profiles RENAME COLUMN provider TO providerType;
+ALTER TABLE provider_profiles ADD COLUMN name TEXT NOT NULL DEFAULT 'Imported provider';
+ALTER TABLE provider_profiles ADD COLUMN modelId TEXT NOT NULL DEFAULT '';
+ALTER TABLE provider_profiles ADD COLUMN authMode TEXT NOT NULL DEFAULT 'none' CHECK(authMode IN ('api-key','none'));
+ALTER TABLE provider_profiles ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>=1);
+ALTER TABLE provider_profiles ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0 CHECK(updatedAt BETWEEN 0 AND 8640000000000000);
+UPDATE provider_profiles SET updatedAt=createdAt, authMode=CASE WHEN secretRef IS NULL THEN 'none' ELSE 'api-key' END;
+CREATE TRIGGER provider_revision BEFORE UPDATE ON provider_profiles BEGIN
+ SELECT CASE WHEN NEW.revision!=OLD.revision+1 OR NEW.id!=OLD.id OR NEW.createdAt!=OLD.createdAt THEN RAISE(ABORT, 'version conflict') END;
+END;
 ` }];
 
 export function migrate(db: DatabaseSync, steps: readonly Migration[] = migrations): void {

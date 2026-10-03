@@ -67,7 +67,8 @@ export interface Artifact {
   relativePath: string; mimeType: string; size: number; hash: string; createdAt: Timestamp;
 }
 export interface ProviderProfile {
-  id: ProviderId; provider: string; endpoint: string; secretRef: string | null;
-  settings: { timeoutMs: number }; createdAt: Timestamp;
+  id: ProviderId; name: string; providerType: string; endpoint: string; modelId: string;
+  authMode: 'api-key' | 'none'; secretRef: string | null; revision: number;
+  settings: { timeoutMs: number }; createdAt: Timestamp; updatedAt: Timestamp;
 }
 export interface Grant { id: GrantId; appId: AppId; capability: string; resource: string; mode: 'read' | 'write' | 'execute'; createdAt: Timestamp }

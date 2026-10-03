@@ -20,7 +20,8 @@
     "test:foundation": "npm run typecheck && npm run build && node --test --test-concurrency=1 tests/integration/*.test.mjs",
     "spike:live": "node spikes/pi-windows/src/live.mjs",
     "spike:native": "node spikes/pi-windows/src/native-probe.mjs",
-    "spike:environment": "node spikes/pi-windows/src/environment.mjs"
+    "spike:environment": "node spikes/pi-windows/src/environment.mjs",
+    "provider:live": "node scripts/provider-live.mjs"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "0.73.1",
