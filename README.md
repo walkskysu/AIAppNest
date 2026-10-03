@@ -34,7 +34,9 @@ npm.cmd test        # 类型检查、生产构建、真实进程测试及已有 
 
 ## 本地持久化
 
-“模型设置”可添加 OpenAI 官方或本地回环 OpenAI 兼容文本模型，手动输入模型 ID，保存后点击“测试模型连接”。保存不产生模型调用，测试可能产生少量费用。数据库仅存凭据引用，测试使用 Pi 0.73.1 的文本生成协议。支持范围、凭据生命周期和失败补偿见[Provider 架构](docs/technical/provider-architecture.md)，自动测试与尚待真实模型验收的记录见[P01–P18](docs/technical/provider-validation.md)。兼容本地接入当前为预览，不代表任意兼容服务已认证。
+“模型设置”可添加 OpenAI 官方、DeepSeek 官方或本地回环 OpenAI 兼容文本模型。选择 DeepSeek 会填入 `https://api.deepseek.com` 和 `deepseek-flash`；在密码控件输入对应 Key，保存后显式点击“测试模型连接”，超时可设为 60000 ms。保存不产生模型调用，测试可能产生少量费用，仅验证非思考文本连接。数据库仅存凭据引用，测试使用锁定的 Pi 0.73.1。支持范围、凭据生命周期和失败补偿见[Provider 架构](docs/technical/provider-architecture.md)，自动测试与尚待真实模型验收的记录见[P01–P18 / D01–D11](docs/technical/provider-validation.md)。兼容本地接入当前为预览，不代表任意兼容服务已认证。
+
+真实验收先在界面保存云端和本地配置并记录显示的配置 UUID，然后关闭桌面，执行 `npm.cmd run provider:live -- --data-root=<受控数据目录> --cloud=<云端配置UUID> --local=<本地配置UUID>`。命令不接受 Key；完整通过必须同时满足真实云端和真实本地文本测试。DeepSeek 接入 PR 或模拟测试通过不解除 #9 的前置门槛，操作步骤与脱敏证据说明见[人工集成门禁](docs/technical/provider-validation.md#p18-人工集成门禁)。
 
 Service Host 在数据库初始化成功后报告就绪。默认数据目录为 `%LOCALAPPDATA%/LocalAIHub`，数据库位于 `data/platform.db`；显式 Electron `--user-data-dir` profile 使用其 `platform` 子目录。数据库启用外键、WAL 和 busy timeout，初始化失败保留原数据并报告错误。只有 Service Host 操作产品数据库。
 

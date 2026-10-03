@@ -4,6 +4,7 @@ import { build } from 'esbuild';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve, join, isAbsolute } from 'node:path';
 import { createRequire } from 'node:module';
+import { runLiveGate } from './provider-live-gate.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).map(value => {
   const split = value.indexOf('='); return [value.slice(2, split), value.slice(split + 1)];
@@ -23,13 +24,7 @@ try {
       runtime => testRuntime(runtime, resolve('dist/provider-probe.cjs')));
     // Validate both identities before making either network request.
     const cloud = storage.providers.get({ id: args.cloud }), local = storage.providers.get({ id: args.local });
-    if (cloud.providerType !== 'openai' || cloud.authMode !== 'api-key' || local.providerType !== 'local-openai') throw new Error();
-    for (const [name, profile] of [['cloud', cloud], ['local', local]]) {
-      const result = await service.request({ operation: 'test', input: { id: profile.id, revision: profile.revision } });
-      report[name] = result.ok ? { modelId: profile.modelId, revision: profile.revision, ...result.value.result, id: undefined } : { code: result.error.code };
-    }
-    report.gate = report.cloud.code === 'SUCCESS' && report.local.code === 'SUCCESS' && !report.cloud.stale && !report.local.stale ? 'PASS' : 'BLOCKED';
-    report.code = report.gate === 'PASS' ? 'REAL_MODEL_TEXT_GENERATION_VERIFIED' : 'MODEL_TEST_FAILED';
+    Object.assign(report, await runLiveGate(service, cloud, local));
     // Each run has its own ignored evidence directory; do not overwrite earlier evidence.
     writeFileSync(join(temporary, 'report.json'), JSON.stringify(report, null, 2));
     if (report.gate !== 'PASS') process.exitCode = 2;
