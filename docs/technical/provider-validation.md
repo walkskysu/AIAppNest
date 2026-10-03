@@ -36,14 +36,40 @@ P01–P16 位于 `tests/integration/providers.test.mjs`，P17 位于 `desktop.te
 ## P18 人工集成门禁
 
 1. 在正常 Windows 当前用户会话执行 `npm.cmd ci`、`npm.cmd run build`、`npm.cmd test`，确保 P09/P17 通过。
-2. 启动桌面“模型设置”。配置一条 OpenAI 官方云端模型（非 reasoning 文本模型，实际可用精确 ID）；Key 仅在本机密码控件输入。再配置一条本地兼容服务（计划 Ollama `/v1`，先在本机准备并启动真实模型）。记录准确服务/模型版本，不把测试 Key 写入仓库或普通 CI。
-3. 分别点击“测试模型连接”，核对修订与结果。关闭桌面，避免人工验收进程与 Service Host 同时操作同一数据根。
-4. 从数据库中只获取两条配置的 UUID，显式执行下列命令。参数不包含 Key；脚本从 DPAPI 解析已存凭据，只发固定短请求，可能产生少量模型费用。
+2. 启动桌面“模型设置”。选择“DeepSeek 官方”，确认 `https://api.deepseek.com`、`deepseek-flash`，超时可输入 60000 ms；Key 仅在本机密码控件输入并保存。也可使用已有 OpenAI 官方非 reasoning 文本配置。再配置一条本地兼容服务（计划 Ollama `/v1`，先在本机准备并启动真实模型）。记录准确服务/模型版本，不把 Key 写入仓库、环境变量、命令行或普通 CI。
+3. 分别点击“测试模型连接”，核对修订与结果。从设置页的“配置 UUID”复制这两条非秘密 ID，不需要导出数据库。记录实际数据根：默认 `%LOCALAPPDATA%\LocalAIHub`；若通过 Electron `--user-data-dir=<profile>` 启动，则使用 `<profile>\platform`。
+4. 关闭桌面并等待 Service Host 退出，避免人工验收进程与 Service Host 同时写同一数据库。显式执行下列命令。参数不包含 Key；脚本从 DPAPI 解析已存凭据，只发固定短请求，可能产生少量模型费用。
 
 ```powershell
 npm.cmd run provider:live -- --data-root=C:\受控数据目录 --cloud=<云端配置UUID> --local=<本地配置UUID>
 ```
 
-脚本仅当两条真实配置的当前修订均生成文本成功才返回 PASS/退出码 0；失败或缺参数为 BLOCKED/退出码 2。证据写入独立忽略目录 `.test-provider-live-*/report.json`，仅含模型 ID、修订、时间、耗时和固定分类，无端点、Key、secretRef、请求/回复或异常正文。分享前核对模型 ID 不含敏感业务标识。保存原始失败证据后重跑，不手改结果。缺参数不会发生模型调用。
+脚本接受 OpenAI 或 DeepSeek 官方作为 `--cloud`，必须同时提供 `--local`。两条配置的准确修订、运行配置和凭据均在任何调用之前校验；只有两者均完整生成文本成功且未过期才返回 PASS/退出码 0。失败或缺参数为 BLOCKED/退出码 2。证据写入独立忽略目录 `.test-provider-live-*/report.json`，仅含提供商、模型 ID、修订、非思考文本 SSE 测试模式、时间、耗时和固定分类，无端点、Key、secretRef、请求/回复或异常正文。分享前核对模型 ID 不含敏感业务标识。保存原始失败证据后重跑，不手改结果。缺参数不会发生模型调用；无凭据/配置时明确 BLOCKED，不提供冒充完整验收的云端单独 PASS。
 
 验收需补充具体模型/本地服务版本、产品 DPAPI 成功记录与报告；跨账户解密失败需在另一个正常 Windows 用户会话人工验证。本 Issue 不以一次文本成功认证工具、多模态或完整任务执行能力。前置 Spike 的其余真实会话门禁仍按原报告单独完成。
+
+## Issue #21：D01–D11（2026-10-03）
+
+在已合并 Provider 基线上实现；以上 P01–P18 的历史失败和待验收记录保留。DeepSeek 官方文档及锁定 Pi 源码核对依据见 [参数兼容性](provider-architecture.md#deepseek-参数兼容性核对2026-10-03)。
+
+| 编号 | 验证内容 | 当前证据与边界 |
+|---|---|---|
+| D01 | UI 默认值、保存、重载；SQLite 关闭重开 | 服务持久化自动测试通过；新增真实 Electron 设置页回归，完整结果见下 |
+| D02 | 实际模型、thinking、Bearer、URL、输出预算 | PASS，正式 Service/Runtime/Pi 路径到 HTTP 捕获，精确完整请求体断言 |
+| D03 | 正常 SSE 非空最终正文 | PASS，必须 stop、DONE、完整流结束 |
+| D04 | 仅思考、空正文、length、缺标记、畸形/未知/错误/超大流 | PASS，全部拒绝误报成功，length 单独分类 |
+| D05 | DPAPI、脱敏 DTO、日志/配置/SQLite/WAL/密文扫描 | 新增真实产品 DPAPI DeepSeek 测试；非 DPAPI 脱敏/持久化扫描已通过，完整结果见下。命令行路径沿用原 helper 仅传操作名、Key 走匿名管道的实现 |
+| D06 | OpenAI → DeepSeek 不沿用 Key、旧修订无效 | PASS 服务测试；另有 Electron 清空/换绑测试 |
+| D07 | 401/403/402/404/429/5xx、错误协议、超时、重定向 | PASS，单请求无重试、重定向目标零请求、总时限终止 |
+| D08 | 三类 Provider 并行及既有兼容回归 | PASS，实际捕获对应端点/Key、全局环境不变 |
+| D09 | DeepSeek 云端门禁、精确修订、缺本地/凭据/参数 | PASS，正式 Service gate 测试；模拟云端成功/本地失败仍 BLOCKED。测试里的模拟 PASS 不是 live 证据 |
+| D10 | 本机真实 DeepSeek 非思考文本 | **BLOCKED / 待用户本机验证**：未提供真实受控 Key；未向 DeepSeek 发送真实请求 |
+| D11 | 真实云端 + 真实本地完整前置门禁 | **BLOCKED / 待用户本机验证**：没有真实本地模型验收证据；本 PR 不解除 #9 阻塞 |
+
+定向回归命令 `node --test --test-name-pattern='D0|P10|P11|P12|P13|P15' tests/integration/providers.test.mjs`：首轮 9 项全部通过（加入 D05 原生检查之前）。普通 CI 使用非敏感测试标记和本地 HTTP 服务，不需要真实 API Key。D10/D11 必须另附在正常 Windows 当前用户会话按上述步骤产生的脱敏报告，不因代码发布、合并或标签变化自动通过。
+
+本次受限 shell 完整执行 `npm.cmd test`：类型检查、生产构建通过，74 项中 69 PASS、4 FAIL、1 SKIP。P09/D05 为 CurrentUser DPAPI `CREDENTIAL_UNAVAILABLE`；desktop/development 两个测试文件因 Electron 运行时下载 `fetch failed` 无法加载；既有 Spike DPAPI 报 `0x80131430` 并 skip。未关闭 sandbox、未替代明文存储、未跳过新增 DPAPI/桌面硬检查。随后修订失效、门禁预检报告及端点兼容审查后，再次类型检查/构建与无原生环境依赖的 Provider 定向回归通过；宿主发布工具会对最终文件独立运行完整 `npm.cmd test`，托管自动回归以其返回结果为准。
+
+首次宿主完整检查：79 项，78 PASS、1 FAIL、0 SKIP。P09/D05 产品 DPAPI 和既有 Electron 测试全部通过；新增 D01/D06 桌面用例在 option 禁用断言失败。已改为直接检查原生 option.disabled（避免 Playwright 将状态查询重定向到外层带 label 的 select），保留该检查后重新提交完整回归。
+
+恢复执行后的最终受限 shell 回归：`npm.cmd test` 类型检查及构建通过，79 项中 70 PASS、8 FAIL、1 SKIP。6 个 Electron 用例因运行时目录缺少 sandbox 所需的 `ALL APPLICATION PACKAGES` 读取 ACL 无法启动；P09/D05 仍因 CurrentUser DPAPI 不可用失败；原 Spike DPAPI 环境检查 skip。其余 Provider 实际请求、SSE、修订、隔离、门禁与存储测试通过。未修改 ACL、关闭 sandbox 或绕过 DPAPI；最终完整自动回归由宿主发布检查重新执行。D10/D11 仍没有真实模型证据。
