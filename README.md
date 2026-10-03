@@ -1,6 +1,6 @@
 # AIAppNest
 
-Windows 本地 AI 应用工作台。当前提供 Electron + Vue 3 + TypeScript 基础工程，包含独立 Node Service Host、类型化 IPC、领域模型与 SQLite 持久化；应用管理 UI、模型凭据服务与 Pi 执行尚未接入。
+Windows 本地 AI 应用工作台。当前提供 Electron + Vue 3 + TypeScript 基础工程，包含独立 Node Service Host、类型化 IPC、领域模型与 SQLite 持久化，以及模型设置、Windows DPAPI 凭据保护和显式连接测试；应用管理 UI 与 Pi 会话执行尚未接入。
 
 ## 开发启动
 
@@ -34,10 +34,12 @@ npm.cmd test        # 类型检查、生产构建、真实进程测试及已有 
 
 ## 本地持久化
 
+“模型设置”可添加 OpenAI 官方或本地回环 OpenAI 兼容文本模型，手动输入模型 ID，保存后点击“测试模型连接”。保存不产生模型调用，测试可能产生少量费用。数据库仅存凭据引用，测试使用 Pi 0.73.1 的文本生成协议。支持范围、凭据生命周期和失败补偿见[Provider 架构](docs/technical/provider-architecture.md)，自动测试与尚待真实模型验收的记录见[P01–P18](docs/technical/provider-validation.md)。兼容本地接入当前为预览，不代表任意兼容服务已认证。
+
 Service Host 在数据库初始化成功后报告就绪。默认数据目录为 `%LOCALAPPDATA%/LocalAIHub`，数据库位于 `data/platform.db`；显式 Electron `--user-data-dir` profile 使用其 `platform` 子目录。数据库启用外键、WAL 和 busy timeout，初始化失败保留原数据并报告错误。只有 Service Host 操作产品数据库。
 
 领域与仓储已覆盖应用配置版本、Skill、会话、执行、消息/事件、版本化记忆、产物、提供商凭据引用和授权。详见[存储架构与一致性约定](docs/technical/storage-architecture.md)和[S01–S18 真实 SQLite 验证](docs/technical/storage-validation.md)。存储测试使用临时目录，不依赖个人数据或模型密钥；自动恢复核对、跨文件原子提交和备份恢复不在当前实现范围。
 
-**验证状态：**托管 Windows 环境的完整 `npm.cmd test` 已通过，包含真实 Electron 和 Node 的安全与生命周期验证。受限 shell 的 Electron sandbox ACL 失败记录仍保留；没有关闭沙箱或以模拟结果替代桌面验收。前置 [Pi Spike 报告](docs/technical/pi-windows-spike-report.md)的真实模型验收仍未完成；本次托管环境的 DPAPI 回归通过不代表此前全部验收门禁解除。GitHub Actions 结果须以远端实际执行为准。
+**验证状态：**既有 Foundation/Storage 已在托管 Windows 环境通过完整回归，包含真实 Electron 和 Node 的安全与生命周期验证；新增 Provider 的测试状态见 [P01–P18](docs/technical/provider-validation.md)。受限 shell 的 Electron sandbox ACL 失败记录仍保留；没有关闭沙箱或以模拟结果替代桌面验收。前置 [Pi Spike 报告](docs/technical/pi-windows-spike-report.md)的真实模型验收仍未完成，既有 DPAPI 回归通过不代表此前全部验收门禁解除。GitHub Actions 结果须以远端实际执行为准。
 
 发行安装包、签名、自动更新不在本次范围；`dist` 是本机运行的构建目录，不是可分发安装包。已有 Pi 验证入口保留于 [spikes/pi-windows](spikes/pi-windows/README.md)。
