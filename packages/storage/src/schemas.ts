@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { appConfigSchema } from '@aiappnest/domain';
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 const time = z.number().int().min(0).max(8640000000000000);
 const version = z.number().int().positive();
@@ -8,10 +9,10 @@ const appId = uuid, id = uuid;
 export const schemas = {
   apps: z.strictObject({ id, name: text, description: text, icon: text.nullable(), status: z.enum(['draft','ready','archived']), currentRevisionId: uuid.nullable(), version, createdAt: time, updatedAt: time }),
   revisions: z.strictObject({ id, appId, revision: version, providerProfileId: uuid,
-    config: z.strictObject({ schemaVersion: z.literal(1), modelId: text,
+    config: z.union([appConfigSchema, z.strictObject({ schemaVersion: z.literal(1), modelId: text,
       memory: z.strictObject({ enabled: z.boolean(), maxItems: z.number().int().nonnegative(), tokenBudget: z.number().int().nonnegative() }),
       permissions: z.strictObject({ mode: z.enum(['chat','controlled-files','trusted-automation']), shell: z.boolean() }),
-    }), roleText: text, runtimeVersion: text, createdAt: time }),
+    })]), roleText: text, runtimeVersion: text, createdAt: time }),
   skills: z.strictObject({ id, version: text.regex(/^\d+\.\d+\.\d+$/).max(40), hash, sourcePath: text, metadata: z.strictObject({ name: text, description: text }), importedAt: time }),
   appSkills: z.strictObject({ revisionId: uuid, skillId: uuid, skillVersion: text, enabled: z.boolean() }),
   conversations: z.strictObject({ id, appId, revisionId: uuid, title: text, piSessionFile: text.nullable(), status: z.enum(['active','archived']), createdAt: time, updatedAt: time }),

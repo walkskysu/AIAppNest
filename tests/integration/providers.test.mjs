@@ -65,6 +65,21 @@ test('P01 strict supported configuration, manual model IDs, endpoint and setting
   ]) assert.equal(providerSaveSchema.safeParse(save(config(bad)).input).success, false);
 });
 
+test('DeepSeek official configuration uses the existing credential boundary without a live probe', async t => {
+  let calls = 0;
+  const { service } = fixture(t, async () => { calls++; return 'SUCCESS'; });
+  const deepseek = config({ providerType: 'deepseek', endpoint: 'https://api.deepseek.com', modelId: 'deepseek-flash', authMode: 'api-key' });
+  for (const endpoint of ['https://api.deepseek.com', 'https://api.deepseek.com/v1']) {
+    const p = ok(await service.request(save({ ...deepseek, endpoint }, { action: 'replace', key: 'controlled-deepseek-test-key' }))).profile;
+    const runtime = service.runtime(identity(p)); assert.equal(runtime.model.baseUrl, endpoint); assert.equal(runtime.model.api, 'openai-completions');
+    assert.equal(runtime.model.id, 'deepseek-flash'); assert.equal(runtime.apiKey, 'controlled-deepseek-test-key');
+  }
+  for (const bad of [{ endpoint: 'https://api.deepseek.com.evil/v1' }, { endpoint: 'http://api.deepseek.com/v1' },
+    { endpoint: 'https://api.deepseek.com/v1?key=secret' }, { endpoint: 'https://api.deepseek.com/evil' }, { authMode: 'none' }])
+    assert.equal(providerSaveSchema.safeParse(save({ ...deepseek, ...bad }, { action: 'replace', key: 'controlled-key' }).input).success, false);
+  assert.equal(calls, 0);
+});
+
 test('P02 save/list are redacted, persistent, and never call a model', async t => {
   let calls = 0;
   const { service, storage, root } = fixture(t, async () => { calls++; return 'SUCCESS'; });

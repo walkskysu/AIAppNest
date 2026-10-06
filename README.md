@@ -1,6 +1,6 @@
 # AIAppNest
 
-Windows 本地 AI 应用工作台。当前提供 Electron + Vue 3 + TypeScript 基础工程，包含独立 Node Service Host、类型化 IPC、领域模型与 SQLite 持久化，以及模型设置、Windows DPAPI 凭据保护和显式连接测试；应用管理 UI 与 Pi 会话执行尚未接入。
+Windows 本地 AI 应用工作台。当前提供 Electron + Vue 3 + TypeScript 基础工程、独立 Node Service Host、类型化 IPC、SQLite 持久化、应用首页与配置编辑、不可变版本、复制与归档，以及模型设置、Windows DPAPI 凭据保护和显式连接测试。聊天、试运行与 Pi 会话执行尚未接入。
 
 ## 开发启动
 
@@ -34,9 +34,11 @@ npm.cmd test        # 类型检查、生产构建、真实进程测试及已有 
 
 ## 本地持久化
 
+首页无需编辑 JSON 即可创建、搜索、收藏、编辑、复制和归档应用。基础编辑使用草稿乐观锁，发布生成不可变快照；旧会话不随新版本升级。复制清空模型关联和外部目录授权，需重新配置。打开只进入应用空间，不启动 Worker。“可使用（配置就绪）”不代表通过模型连接或端到端试运行。详见[版本与补偿规则](docs/technical/app-architecture.md)和[A01–A10 验证记录](docs/technical/app-validation.md)。
+
 “模型设置”可添加 OpenAI 官方、DeepSeek 官方或本地回环 OpenAI 兼容文本模型。选择 DeepSeek 会填入 `https://api.deepseek.com` 和 `deepseek-flash`；在密码控件输入对应 Key，保存后显式点击“测试模型连接”，超时可设为 60000 ms。保存不产生模型调用，测试可能产生少量费用，仅验证非思考文本连接。数据库仅存凭据引用，测试使用锁定的 Pi 0.73.1。支持范围、凭据生命周期和失败补偿见[Provider 架构](docs/technical/provider-architecture.md)，自动测试与尚待真实模型验收的记录见[P01–P18 / D01–D11](docs/technical/provider-validation.md)。兼容本地接入当前为预览，不代表任意兼容服务已认证。
 
-真实验收先在界面保存云端和本地配置并记录显示的配置 UUID，然后关闭桌面，执行 `npm.cmd run provider:live -- --data-root=<受控数据目录> --cloud=<云端配置UUID> --local=<本地配置UUID>`。命令不接受 Key；完整通过必须同时满足真实云端和真实本地文本测试。DeepSeek 接入 PR 或模拟测试通过不解除 #9 的前置门槛，操作步骤与脱敏证据说明见[人工集成门禁](docs/technical/provider-validation.md#p18-人工集成门禁)。
+真实验收先在界面保存云端和本地配置并记录显示的配置 UUID，然后关闭桌面，执行 `npm.cmd run provider:live -- --data-root=<受控数据目录> --cloud=<云端配置UUID> --local=<本地配置UUID>`。命令不接受 Key；完整通过必须同时满足真实云端和真实本地文本测试。根据 #9 于 2026-10-06 更新的开发前置条件，本地模型与完整 provider:live 验收不阻塞应用管理开发；这不代表完整真实模型验收已通过，操作步骤与脱敏证据说明见[人工集成门禁](docs/technical/provider-validation.md#p18-人工集成门禁)。
 
 Service Host 在数据库初始化成功后报告就绪。默认数据目录为 `%LOCALAPPDATA%/LocalAIHub`，数据库位于 `data/platform.db`；显式 Electron `--user-data-dir` profile 使用其 `platform` 子目录。数据库启用外键、WAL 和 busy timeout，初始化失败保留原数据并报告错误。只有 Service Host 操作产品数据库。
 

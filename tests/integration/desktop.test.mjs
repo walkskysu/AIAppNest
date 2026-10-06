@@ -29,6 +29,75 @@ async function launch(t, root = resolve('dist')) {
 }
 async function ready(page) { await page.waitForFunction(() => document.querySelector('[data-testid="phase"]')?.getAttribute('data-phase') === 'ready'); }
 
+test('A01/A02/A07/A08 desktop app management uses forms, persists after service restart and opens no Worker', { timeout: 60000 }, async t => {
+  const { page } = await launch(t); await ready(page);
+  const pid = (await page.evaluate(() => window.desktop.getStatus())).value.pid;
+  await page.getByRole('button', { name: '创建应用', exact: true }).click();
+  await page.getByLabel('应用名称', { exact: true }).fill('桌面写作助手');
+  await page.getByLabel('应用简介', { exact: true }).fill('中文描述');
+  await page.getByLabel('角色说明', { exact: true }).fill('协助整理文稿');
+  await page.getByLabel('输出要求', { exact: true }).fill('清晰简洁');
+  await page.getByLabel('分类', { exact: true }).fill('文稿');
+  await page.getByLabel('图标', { exact: true }).selectOption('book');
+  await page.getByLabel('收藏应用', { exact: true }).check();
+  await page.getByRole('button', { name: '保存应用草稿', exact: true }).click();
+  await page.getByTestId('app-feedback').filter({ hasText: '草稿已保存' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '发布配置版本', exact: true }).isDisabled(), true);
+  const card = page.getByTestId('app-card').filter({ hasText: '桌面写作助手' });
+  await card.getByText('配置未完成', { exact: true }).waitFor();
+  // Controlled no-auth profile: configuration-only acceptance, no connection test or model request.
+  await page.getByRole('button', { name: '模型设置', exact: true }).click();
+  await page.getByLabel('显示名称', { exact: true }).fill('应用配置测试模型');
+  await page.getByLabel('协议', { exact: true }).selectOption('local-openai');
+  await page.getByLabel('模型 ID', { exact: true }).fill('controlled-not-live-tested');
+  await page.getByRole('button', { name: '保存模型', exact: true }).click();
+  await page.getByTestId('provider-feedback').filter({ hasText: '已保存' }).waitFor();
+  await page.getByRole('button', { name: '关闭模型设置', exact: true }).click();
+  await page.getByRole('button', { name: '刷新模型选项', exact: true }).click();
+  await page.getByLabel('应用模型', { exact: true }).selectOption({ label: '应用配置测试模型 · controlled-not-live-tested · v1' });
+  await page.getByRole('button', { name: '保存应用草稿', exact: true }).click();
+  await page.getByTestId('app-feedback').filter({ hasText: '草稿已保存' }).waitFor();
+  await page.getByRole('button', { name: '发布配置版本', exact: true }).click();
+  await page.getByTestId('app-feedback').filter({ hasText: '配置版本已发布；未进行端到端试运行' }).waitFor();
+  await card.getByText('可使用（配置就绪）', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '关闭编辑', exact: true }).click();
+  await page.getByLabel('搜索应用', { exact: true }).fill('中文描述');
+  await page.getByRole('button', { name: '搜索', exact: true }).click();
+  await card.getByRole('button', { name: '取消收藏', exact: true }).waitFor();
+  await card.getByRole('button', { name: '打开应用', exact: true }).click();
+  await page.getByTestId('app-space').getByText('聊天与新建会话尚未接入；未进行端到端试运行。', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '新建对话（尚未接入）', exact: true }).isDisabled(), true);
+  assert.equal((await page.evaluate(() => window.desktop.getStatus())).value.pid, pid);
+  await page.getByRole('button', { name: '返回应用首页', exact: true }).click();
+  await card.getByRole('button', { name: '编辑', exact: true }).click();
+  await page.getByLabel('应用名称', { exact: true }).fill('桌面改名助手');
+  await page.getByRole('button', { name: '保存应用草稿', exact: true }).click();
+  await page.getByTestId('app-feedback').filter({ hasText: '草稿已保存' }).waitFor();
+  await page.getByRole('button', { name: '关闭编辑', exact: true }).click();
+  // Restart the real sidecar, then remount UI; no in-memory storage can satisfy this check.
+  process.kill(pid);
+  await page.waitForFunction(() => document.querySelector('[data-testid="phase"]').getAttribute('data-phase') === 'failed');
+  await wait(300); await page.getByRole('button', { name: '重试服务', exact: true }).click(); await ready(page);
+  await page.reload(); await ready(page);
+  const renamed = page.getByTestId('app-card').filter({ hasText: '桌面改名助手' });
+  await renamed.getByRole('button', { name: '取消收藏', exact: true }).waitFor();
+  await renamed.getByRole('button', { name: '复制', exact: true }).click();
+  await page.getByTestId('app-feedback').filter({ hasText: '模型关联和外部目录授权需重新配置' }).waitFor();
+  assert.equal(await page.getByLabel('应用模型', { exact: true }).inputValue(), '');
+  await page.getByRole('button', { name: '关闭编辑', exact: true }).click();
+  const original = page.getByTestId('app-card').filter({ has: page.getByRole('heading', { name: '▤ 桌面改名助手', exact: true }) });
+  await original.getByRole('button', { name: '归档', exact: true }).click();
+  await original.waitFor({ state: 'detached' });
+  await page.getByLabel('查看已归档', { exact: true }).check();
+  await original.getByText('已归档', { exact: true }).waitFor();
+  assert.equal(await original.getByRole('button', { name: '打开应用', exact: true }).isDisabled(), true);
+  await original.getByRole('button', { name: '恢复', exact: true }).click();
+  await original.waitFor({ state: 'detached' });
+  await page.getByLabel('查看已归档', { exact: true }).uncheck(); await original.waitFor();
+  const invalid = await page.evaluate(() => window.desktop.apps({ operation: 'writeFile', path: 'x' }));
+  assert.equal(invalid.error.code, 'INVALID_INPUT');
+});
+
 test('P17 production settings: manual save/probe, revision invalidation and transient key clearing', { timeout: 60000 }, async t => {
   let requests = 0;
   const authorization = [];
@@ -132,7 +201,7 @@ test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload 
   const initial = await page.evaluate(() => window.desktop.getStatus());
   const pid = initial.value.pid;
   const surface = await page.evaluate(() => ({ keys: Object.keys(window.desktop).sort(), require: typeof window.require, process: typeof window.process, ipc: typeof window.ipcRenderer }));
-  assert.deepEqual(surface, { keys: ['getStatus', 'onStatusChanged', 'ping', 'providers', 'retryService'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
+  assert.deepEqual(surface, { keys: ['apps', 'getStatus', 'onStatusChanged', 'ping', 'providers', 'retryService'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
   const prefs = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences());
   for (const key of ['sandbox', 'contextIsolation', 'webSecurity']) assert.equal(prefs[key], true);
   for (const key of ['nodeIntegration', 'nodeIntegrationInWorker', 'nodeIntegrationInSubFrames', 'webviewTag', 'allowRunningInsecureContent']) assert.equal(prefs[key], false, key);

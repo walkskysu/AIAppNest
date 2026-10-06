@@ -1,0 +1,144 @@
+import { defineComponent, h, onMounted, reactive, ref, watch } from 'vue';
+import { newAppConfig, type AppView, type AppIssue, type AppRequest, type AppReply, type ProviderView } from '@aiappnest/contracts';
+
+const states = { usable: '可使用（配置就绪）', incomplete: '配置未完成', 'missing-dependencies': '缺少依赖', archived: '已归档' };
+const reasons: Record<AppIssue, string> = { MODEL_REQUIRED: '请重新选择并确认模型关联', PROVIDER_MISSING: '模型配置不存在',
+  PROVIDER_CHANGED: '模型配置已变化，请重新选择确认', MODEL_INVALID: '模型设置无效', CREDENTIAL_UNAVAILABLE: '模型凭据缺失、不可读取或端点已变化',
+  SKILL_UNRESOLVED: 'Skill 导入尚未接入，无法解析绑定', PERMISSION_CONFLICT: '工具需求与权限模式冲突', ROLE_REQUIRED: '请填写角色说明',
+  SNAPSHOT_UNAVAILABLE: '版本快照缺失或损坏', NOT_PUBLISHED: '尚未发布配置版本' };
+const icons = { spark: '✦', code: '⌘', book: '▤', pen: '✎' };
+const metadata = (app?: AppView) => ({ name: app?.name ?? '', description: app?.description ?? '',
+  icon: app?.icon ?? 'spark' as AppView['icon'], category: app?.category ?? '', favorite: app?.favorite ?? false });
+export const ApplicationHome = defineComponent({
+  props: { ready: Boolean },
+  setup(props) {
+    const apps = ref<AppView[]>([]), total = ref(0), offset = ref(0), query = ref(''), archived = ref(false), sort = ref<'recent'|'favorite'|'name'>('recent');
+    const selected = ref<AppView>(), editing = ref(false), space = ref<AppView>();
+    const form = reactive(metadata()), draft = ref(newAppConfig()), profiles = ref<ProviderView[]>([]);
+    const busy = ref(false), feedback = ref(''), dirty = ref(false);
+    const call = async (request: AppRequest): Promise<AppReply> => {
+      const result = await window.desktop.apps(request);
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value;
+    };
+    const list = async () => {
+      const result = await call({ operation: 'list', query: query.value, archived: archived.value, sort: sort.value, offset: offset.value, limit: 12 });
+      if (result.operation === 'list') { apps.value = result.apps; total.value = result.total; }
+    };
+    const action = async (fn: () => Promise<void>) => {
+      if (busy.value) return;
+      busy.value = true; feedback.value = '';
+      try { await fn(); } catch (error) { feedback.value = error instanceof Error ? error.message : '操作失败，请重新加载确认。'; }
+      finally { busy.value = false; }
+    };
+    const choose = async (app?: AppView) => {
+      if (app) { const result = await call({ operation: 'get', appId: app.id }); if ('app' in result) app = result.app; }
+      selected.value = app; Object.assign(form, metadata(app));
+      draft.value = app ? JSON.parse(JSON.stringify(app.draft)) : newAppConfig();
+      editing.value = true; space.value = undefined; dirty.value = false;
+      const result = await window.desktop.providers({ operation: 'list' });
+      if (result.ok && result.value.operation === 'list') profiles.value = result.value.profiles;
+      else if (!result.ok) throw new Error(result.error.message);
+    };
+    const save = async () => {
+      let app = selected.value;
+      if (!app) {
+        const created = await call({ operation: 'create', metadata: { ...form } });
+        if (!('app' in created)) return;
+        app = created.app; selected.value = app;
+      }
+      const result = await call({ operation: 'update', appId: app.id, expectedVersion: app.version, metadata: { ...form }, draft: JSON.parse(JSON.stringify(draft.value)) });
+      if ('app' in result) { selected.value = result.app; dirty.value = false; }
+      feedback.value = '草稿已保存。发布配置不代表连接测试或端到端试运行通过。'; await list();
+    };
+    const change = () => { dirty.value = true; };
+    const text = (label: string, value: string, set: (v: string) => void, multiline = false) => h('label', [label,
+      h(multiline ? 'textarea' : 'input', { 'aria-label': label, value, onInput: (e: Event) => { set((e.target as HTMLInputElement).value); change(); } })]);
+    const number = (label: string, value: number, set: (v: number) => void, min: number, max: number, step = 1) => h('label', [label,
+      h('input', { 'aria-label': label, type: 'number', min, max, step, value, onInput: (e: Event) => { set(Number((e.target as HTMLInputElement).value)); change(); } })]);
+    const check = (label: string, value: boolean, set: (v: boolean) => void) => h('label', { class: 'check' }, [
+      h('input', { type: 'checkbox', checked: value, onChange: (e: Event) => { set((e.target as HTMLInputElement).checked); change(); } }), label]);
+    const button = (label: string, fn: () => Promise<void>, disabled = false) => h('button', { type: 'button', class: 'secondary', disabled: busy.value || !props.ready || disabled, onClick: () => action(fn) }, label);
+    const refresh = () => action(async () => { offset.value = 0; await list(); });
+    onMounted(() => { if (props.ready) void refresh(); });
+    watch(() => props.ready, ready => { if (ready) void refresh(); });
+    return () => h('section', { class: 'app-home' }, [
+      h('div', { class: 'actions' }, [h('h1', '我的应用'), button('创建应用', () => choose()), button('刷新应用列表', list)]),
+      h('p', '配置就绪表示已发布且依赖完整；连接测试、试运行与聊天执行需分别验证。打开应用不会启动任务。'),
+      h('p', { role: 'status', 'data-testid': 'app-feedback' }, feedback.value),
+      space.value ? h('section', { class: 'card', 'data-testid': 'app-space' }, [h('h2', space.value.name),
+        h('p', space.value.description), h('p', '聊天与新建会话尚未接入；未进行端到端试运行。'),
+        h('button', { disabled: true }, '新建对话（尚未接入）'), button('返回应用首页', async () => { space.value = undefined; }),
+      ]) : null,
+      editing.value ? h('section', { class: 'card' }, [h('h2', selected.value ? '编辑应用' : '创建应用'),
+        h('form', { onSubmit: (e: Event) => { e.preventDefault(); void action(save); } }, [
+          h('fieldset', { disabled: busy.value || !props.ready }, [
+            text('应用名称', form.name, v => { form.name = v; }), text('应用简介', form.description, v => { form.description = v; }, true),
+            text('分类', form.category, v => { form.category = v; }),
+            h('label', ['图标', h('select', { 'aria-label': '图标', value: form.icon, onChange: (e: Event) => { form.icon = (e.target as HTMLSelectElement).value as AppView['icon']; change(); } },
+              Object.entries(icons).map(([value, icon]) => h('option', { value }, icon)))]),
+            check('收藏应用', form.favorite, v => { form.favorite = v; }),
+            text('角色说明', draft.value.role, v => { draft.value.role = v; }, true),
+            text('输出要求', draft.value.outputRequirements, v => { draft.value.outputRequirements = v; }, true),
+            text('开场白', draft.value.openingMessage, v => { draft.value.openingMessage = v; }, true),
+            h('label', ['应用模型', h('select', { 'aria-label': '应用模型', value: draft.value.model ? `${draft.value.model.providerProfileId}:${draft.value.model.expectedRevision}` : '',
+              onChange: (e: Event) => { const selected = profiles.value.find(p => `${p.id}:${p.revision}` === (e.target as HTMLSelectElement).value);
+                draft.value.model = selected ? { providerProfileId: selected.id, expectedRevision: selected.revision, temperature: 0.7, maxOutputTokens: 2048 } : null; change(); } },
+              [h('option', { value: '' }, '请选择并确认模型关联'), ...profiles.value.map(p => h('option', { value: `${p.id}:${p.revision}` }, `${p.name} · ${p.modelId} · v${p.revision}`))])]),
+            button('刷新模型选项', async () => { const result = await window.desktop.providers({ operation: 'list' }); if (result.ok && result.value.operation === 'list') profiles.value = result.value.profiles; }),
+            h('p', '先在模型设置中配置模型及凭据。复制应用后必须重新选择。此处保存或发布不会发起连接测试。'),
+            draft.value.model ? h('div', { class: 'form-grid' }, [number('温度', draft.value.model.temperature, v => { draft.value.model!.temperature = v; }, 0, 2, 0.1),
+              number('最大输出 token', draft.value.model.maxOutputTokens, v => { draft.value.model!.maxOutputTokens = v; }, 1, 32768)]) : null,
+            h('p', `Skill 导入尚未接入；当前 ${draft.value.skills.length} 个绑定。无 Skill 可发布；未解析绑定会阻止发布。`),
+            draft.value.skills.length ? button('清除 Skill 绑定', async () => { draft.value.skills = []; change(); }) : null,
+            h('label', ['权限模式', h('select', { 'aria-label': '权限模式', value: draft.value.permissions.mode, onChange: (e: Event) => {
+              draft.value.permissions.mode = (e.target as HTMLSelectElement).value as typeof draft.value.permissions.mode; change();
+            } }, [h('option', { value: 'chat' }, '仅对话'), h('option', { value: 'controlled-files' }, '受控文件处理'), h('option', { value: 'trusted-automation' }, '可信自动化')])]),
+            ...(['read','write','shell'] as const).map(tool => check({ read: '读取文件', write: '写入文件', shell: '运行命令' }[tool], draft.value.permissions.tools.includes(tool), enabled => {
+              draft.value.permissions.tools = enabled ? [...draft.value.permissions.tools, tool] : draft.value.permissions.tools.filter(t => t !== tool);
+            })),
+            h('p', '外部目录授权需后续文件工具接入；复制不会继承授权。'),
+            check('启用应用记忆', draft.value.memory.enabled, v => { draft.value.memory.enabled = v; }),
+            check('自动提取候选（仍需审核）', draft.value.memory.automaticCandidates, v => { draft.value.memory.automaticCandidates = v; }),
+            h('div', { class: 'form-grid' }, [number('记忆条数', draft.value.memory.maxItems, v => { draft.value.memory.maxItems = v; }, 0, 100),
+              number('记忆 token 预算', draft.value.memory.tokenBudget, v => { draft.value.memory.tokenBudget = v; }, 0, 32000),
+              number('最多执行轮数', draft.value.execution.maxTurns, v => { draft.value.execution.maxTurns = v; }, 1, 100),
+              number('执行超时（毫秒）', draft.value.execution.timeoutMs, v => { draft.value.execution.timeoutMs = v; }, 1000, 3600000)]),
+            h('div', { class: 'actions' }, [h('button', { type: 'submit' }, '保存应用草稿'),
+              button('发布配置版本', async () => {
+                const app = selected.value!; const result = await call({ operation: 'publish', appId: app.id, expectedVersion: app.version });
+                if ('app' in result) selected.value = result.app;
+                feedback.value = '配置版本已发布；未进行端到端试运行。'; await list();
+              }, !selected.value || dirty.value || selected.value.archived || !!selected.value.draftIssues.length),
+              button('重新加载应用', () => choose(selected.value), !selected.value),
+              button('关闭编辑', async () => { editing.value = false; })]),
+          ]),
+        ]),
+        selected.value ? h('div', [h('p', `草稿版本 ${selected.value.version} · ${states[selected.value.state]}`),
+          h('ul', selected.value.draftIssues.map(reason => h('li', reasons[reason]))),
+          dirty.value ? h('p', '有未保存修改；请先保存草稿。') : null]) : null,
+      ]) : null,
+      h('form', { class: 'app-filters', onSubmit: (e: Event) => { e.preventDefault(); void refresh(); } }, [
+        h('input', { 'aria-label': '搜索应用', placeholder: '搜索名称、简介、分类', value: query.value, onInput: (e: Event) => { query.value = (e.target as HTMLInputElement).value; } }),
+        h('button', { type: 'submit', disabled: busy.value || !props.ready }, '搜索'),
+        h('select', { 'aria-label': '应用排序', value: sort.value, onChange: (e: Event) => { sort.value = (e.target as HTMLSelectElement).value as typeof sort.value; void refresh(); } },
+          [h('option', { value: 'recent' }, '最近使用'), h('option', { value: 'favorite' }, '收藏优先'), h('option', { value: 'name' }, '名称')]),
+        h('label', { class: 'check' }, [h('input', { type: 'checkbox', checked: archived.value, onChange: (e: Event) => { archived.value = (e.target as HTMLInputElement).checked; void refresh(); } }), '查看已归档']),
+      ]),
+      h('div', { class: 'app-grid' }, apps.value.map(app => h('article', { class: 'card app-card', key: app.id, 'data-testid': 'app-card' }, [
+        h('h2', `${icons[app.icon]} ${app.name}`), h('p', app.description || '暂无简介'), h('p', app.category || '未分类'),
+        h('strong', states[app.state]), h('ul', app.reasons.map(reason => h('li', reasons[reason]))),
+        h('p', app.lastOpenedAt ? `最近使用 ${new Date(app.lastOpenedAt).toLocaleString()}` : '尚未打开'),
+        h('div', { class: 'actions' }, [button('打开应用', async () => { const result = await call({ operation: 'open', appId: app.id }); if ('app' in result) { space.value = result.app; editing.value = false; } await list(); }, app.archived),
+          button('编辑', () => choose(app)), button(app.favorite ? '取消收藏' : '收藏', async () => {
+            await call({ operation: 'update', appId: app.id, expectedVersion: app.version, metadata: { ...metadata(app), favorite: !app.favorite }, draft: app.draft }); await list();
+          }), button('复制', async () => { const result = await call({ operation: 'copy', appId: app.id, expectedVersion: app.version }); if ('app' in result) await choose(result.app);
+            feedback.value = '已复制非敏感配置；模型关联和外部目录授权需重新配置，历史未复制。'; await list(); }),
+          button(app.archived ? '恢复' : '归档', async () => { await call({ operation: 'archive', appId: app.id, expectedVersion: app.version, archived: !app.archived }); await list(); }),
+        ]),
+      ]))),
+      h('div', { class: 'actions' }, [h('p', `共 ${total.value} 个应用`), button('上一页', async () => { offset.value = Math.max(0, offset.value - 12); await list(); }, offset.value === 0),
+        button('下一页', async () => { offset.value += 12; await list(); }, offset.value + 12 >= total.value)]),
+    ]);
+  },
+});

@@ -10,6 +10,7 @@ import { DataPaths, resolveDataRoot } from './paths';
 import { migrate } from './migrations';
 import { guard, repository, type RepositorySpec } from './repository';
 import { schemas } from './schemas';
+import { appConfigSchema, newAppConfig, type AppConfig } from '@aiappnest/domain';
 export { DataPaths, resolveDataRoot } from './paths';
 export type { Repository, Page } from './repository';
 
@@ -73,6 +74,70 @@ export class Storage {
     this.grants = make<Grant, Key<Grant,'id'|'appId'>, AppScope>('grants', schemas.grants, ['id','appId'], ['appId'], 'createdAt,id');
   }
 
+  /** Draft changes share apps.version with metadata, publication and archive operations. */
+  appDraft(appId: AppId): { config: AppConfig; category: string; favorite: boolean; lastOpenedAt: number | null } {
+    this.apps.get({ id: appId });
+    const row = this.db.prepare('SELECT * FROM app_drafts WHERE appId=?').get(appId);
+    return row ? { config: appConfigSchema.parse(JSON.parse(row.config as string)), category: row.category as string,
+      favorite: row.favorite === 1, lastOpenedAt: row.lastOpenedAt as number | null }
+      : { config: newAppConfig(), category: '', favorite: false, lastOpenedAt: null };
+  }
+  saveAppDraft(appId: AppId, config: AppConfig, category: string, favorite: boolean): void {
+    guard(() => {
+      const parsed = appConfigSchema.safeParse(config);
+      if (!parsed.success || typeof category !== 'string' || category.length > 40 || typeof favorite !== 'boolean') throw new DomainError('INVALID_INPUT');
+      this.db.prepare(`INSERT INTO app_drafts(appId,config,category,favorite) VALUES(?,?,?,?)
+        ON CONFLICT(appId) DO UPDATE SET config=excluded.config,category=excluded.category,favorite=excluded.favorite`)
+        .run(appId, JSON.stringify(parsed.data), category, favorite ? 1 : 0);
+    });
+  }
+  listApps(query: string, archived: boolean, sort: 'recent' | 'name' | 'favorite', limit: number, offset: number): { apps: App[]; total: number } {
+    return guard(() => {
+      if (typeof query !== 'string' || query.length > 100 || typeof archived !== 'boolean' || !['recent','name','favorite'].includes(sort)
+        || !Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset) || offset < 0) throw new DomainError('INVALID_INPUT');
+      const filter = `(a.status='archived')=? AND (instr(lower(a.name),lower(?))>0 OR instr(lower(a.description),lower(?))>0 OR instr(lower(coalesce(d.category,'')),lower(?))>0)`;
+      const values = [archived ? 1 : 0, query, query, query];
+      const order = sort === 'name' ? 'a.name COLLATE NOCASE,a.id' : `${sort === 'favorite' ? 'coalesce(d.favorite,0) DESC,' : ''}coalesce(d.lastOpenedAt,0) DESC,a.createdAt DESC,a.id`;
+      const from = 'FROM apps a LEFT JOIN app_drafts d ON d.appId=a.id';
+      const total = this.db.prepare(`SELECT count(*) AS n ${from} WHERE ${filter}`).get(...values)!.n as number;
+      const rows = this.db.prepare(`SELECT a.id ${from} WHERE ${filter} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...values, limit, offset);
+      return { apps: rows.map(row => this.apps.get({ id: row.id as AppId })), total };
+    });
+  }
+  touchApp(appId: AppId): void {
+    this.transaction(() => {
+      const draft = this.appDraft(appId);
+      this.saveAppDraft(appId, draft.config, draft.category, draft.favorite);
+      this.db.prepare('UPDATE app_drafts SET lastOpenedAt=? WHERE appId=?').run(timestamp(), appId);
+    });
+  }
+  activeAppRuns(appId: AppId): number {
+    this.apps.get({ id: appId });
+    return this.db.prepare("SELECT count(*) AS n FROM runs WHERE appId=? AND state IN ('queued','starting','running','waiting_approval','cancelling')").get(appId)!.n as number;
+  }
+  nextRevision(appId: AppId): number {
+    return this.db.prepare('SELECT coalesce(max(revision),0)+1 AS n FROM app_revisions WHERE appId=?').get(appId)!.n as number;
+  }
+  saveSnapshot(appId: AppId, revisionId: AppRevision['id'], configHash: string, snapshot: string): void {
+    guard(() => { this.db.prepare('INSERT INTO revision_snapshots VALUES(?,?,?,?)').run(revisionId,appId,configHash,snapshot); });
+  }
+  snapshot(appId: AppId, revisionId: AppRevision['id']): { configHash: string; snapshot: string } {
+    this.revisions.get({ id: revisionId, appId });
+    const row = this.db.prepare('SELECT configHash,snapshot FROM revision_snapshots WHERE revisionId=? AND appId=?').get(revisionId,appId);
+    if (!row) throw new DomainError('NOT_FOUND');
+    return { configHash: row.configHash as string, snapshot: row.snapshot as string };
+  }
+  /** Future ConversationService entry point: choose the current version inside the same transaction. */
+  createConversation(appId: AppId, conversationId: ConversationId, title: string): Conversation {
+    return this.transaction(() => {
+      const app = this.apps.get({ id: appId });
+      if (app.status !== 'ready' || !app.currentRevisionId) throw new DomainError('INVALID_TRANSITION');
+      const now = timestamp();
+      return this.conversations.insert({ id: conversationId, appId, revisionId: app.currentRevisionId, title,
+        piSessionFile: null, status: 'active', createdAt: now, updatedAt: now });
+    });
+  }
+
   saveProvider(value: ProviderProfile, expectedRevision?: number): ProviderProfile {
     return this.transaction(() => {
       if (!schemas.providers.safeParse(value).success) throw new DomainError('INVALID_INPUT');
@@ -118,6 +183,7 @@ export class Storage {
   publishRevision(revision: AppRevision, bindings: AppSkill[], expectedAppVersion: number): AppRevision {
     return this.transaction(() => {
       const app = this.apps.get({ id: revision.appId });
+      if (app.status === 'archived') throw new DomainError('INVALID_TRANSITION');
       if (app.version !== expectedAppVersion) throw new DomainError('VERSION_CONFLICT');
       for (const binding of bindings) {
         if (binding.revisionId !== revision.id) throw new DomainError('OWNERSHIP_MISMATCH');

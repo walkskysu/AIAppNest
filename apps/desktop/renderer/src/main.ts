@@ -2,6 +2,7 @@ import { createApp, defineComponent, h, onMounted, onUnmounted, ref } from 'vue'
 import type { ServiceStatus } from '@aiappnest/contracts';
 import './style.css';
 import { ProviderSettings } from './providers';
+import { ApplicationHome } from './apps';
 
 createApp(defineComponent({
   setup() {
@@ -33,10 +34,10 @@ createApp(defineComponent({
       finally { busy.value = false; }
     };
     return () => h('main', [
-      h('header', [h('span', { class: 'brand' }, 'AIAppNest'), h('span', { class: 'tag' }, '基础工程')]),
+      h('header', [h('span', { class: 'brand' }, 'AIAppNest'), h('span', { class: 'tag' }, '应用工作台')]),
       h('button', { class: 'secondary', onClick: () => { settings.value = !settings.value; }, disabled: status.value.phase !== 'ready' }, settings.value ? '关闭模型设置' : '模型设置'),
       settings.value ? h(ProviderSettings, { ready: status.value.phase === 'ready' }) : null,
-      h('section', { class: 'intro' }, [h('p', { class: 'eyebrow' }, '本地 AI 应用工作台'), h('h1', '从可靠的连接开始'), h('p', '查看独立服务状态，后续能力将在这里逐步接入。')]),
+      h(ApplicationHome, { ready: status.value.phase === 'ready' }),
       h('section', { class: 'card' }, [
         h('div', { class: 'status-line' }, [h('span', { class: `dot ${status.value.phase}` }), h('h2', { 'data-testid': 'phase', 'data-phase': status.value.phase, role: 'status' }, names[status.value.phase])]),
         h('p', status.value.error?.message ?? '通过受控进程通信管理服务，不开放本地网络端口。'),
@@ -46,7 +47,7 @@ createApp(defineComponent({
         ]),
         h('p', { class: 'diagnostic', 'data-testid': 'diagnostic', role: 'status' }, diagnostic.value),
       ]),
-      h('section', { class: 'boundary' }, [h('h2', '当前可用'), h('p', '服务状态 · 模型配置 · 凭据保护 · 手动连接测试'), h('h2', '后续接入'), h('p', '应用管理与 Pi 会话执行尚未实现。'), h('p', '关闭窗口将停止服务；服务异常后不会自动重放请求。')]),
+      h('section', { class: 'boundary' }, [h('h2', '当前可用'), h('p', '应用管理 · 配置版本 · 模型配置 · 凭据保护 · 手动连接测试'), h('h2', '后续接入'), h('p', '试运行、聊天与 Pi 会话执行尚未实现。'), h('p', '关闭窗口将停止服务；服务异常后不会自动重放请求。')]),
     ]);
   },
 })).mount('#app');

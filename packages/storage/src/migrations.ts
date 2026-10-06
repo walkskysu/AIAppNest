@@ -156,6 +156,25 @@ UPDATE provider_profiles SET updatedAt=createdAt, authMode=CASE WHEN secretRef I
 CREATE TRIGGER provider_revision BEFORE UPDATE ON provider_profiles BEGIN
  SELECT CASE WHEN NEW.revision!=OLD.revision+1 OR NEW.id!=OLD.id OR NEW.createdAt!=OLD.createdAt THEN RAISE(ABORT, 'version conflict') END;
 END;
+` }, { version: 3, name: 'application-drafts-and-snapshots', sql: `
+CREATE TABLE app_drafts (
+ appId TEXT PRIMARY KEY REFERENCES apps(id), config TEXT NOT NULL CHECK(json_valid(config)),
+ category TEXT NOT NULL DEFAULT '', favorite INTEGER NOT NULL DEFAULT 0 CHECK(favorite IN (0,1)),
+ lastOpenedAt INTEGER CHECK(lastOpenedAt BETWEEN 0 AND 8640000000000000)
+) STRICT;
+CREATE TABLE revision_snapshots (
+ revisionId TEXT PRIMARY KEY, appId TEXT NOT NULL, configHash TEXT NOT NULL CHECK(length(configHash)=64),
+ snapshot TEXT NOT NULL CHECK(json_valid(snapshot)),
+ FOREIGN KEY(revisionId,appId) REFERENCES app_revisions(id,appId)
+) STRICT;
+${immutable('revision_snapshots')}
+CREATE TRIGGER archived_run BEFORE INSERT ON runs WHEN (SELECT status FROM apps WHERE id=NEW.appId)='archived'
+ BEGIN SELECT RAISE(ABORT, 'invalid transition'); END;
+CREATE TRIGGER archived_conversation BEFORE INSERT ON conversations WHEN (SELECT status FROM apps WHERE id=NEW.appId)='archived'
+ BEGIN SELECT RAISE(ABORT, 'invalid transition'); END;
+CREATE TRIGGER archive_active BEFORE UPDATE OF status ON apps WHEN NEW.status='archived' AND EXISTS(
+ SELECT 1 FROM runs WHERE appId=NEW.id AND state IN ('queued','starting','running','waiting_approval','cancelling'))
+ BEGIN SELECT RAISE(ABORT, 'invalid transition'); END;
 ` }];
 
 export function migrate(db: DatabaseSync, steps: readonly Migration[] = migrations): void {

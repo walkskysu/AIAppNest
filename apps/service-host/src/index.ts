@@ -4,12 +4,14 @@ import { Storage, resolveDataRoot } from '@aiappnest/storage';
 import { join } from 'node:path';
 import { CredentialService } from './credentials';
 import { ProviderService } from './providers';
+import { AppService } from './apps';
 
 // Only the owning Main process can access this inherited IPC pipe. No network listener.
 if (!process.send || process.versions.node !== SERVICE_NODE_VERSION) process.exit(1);
 let ready = false;
 let storage: Storage | undefined;
 let providers: ProviderService | undefined;
+let apps: AppService | undefined;
 const close = () => { storage?.close(); storage = undefined; };
 const handshakeDeadline = setTimeout(() => process.exit(1), 5000);
 const send = (message: HostOutput) => {
@@ -33,6 +35,7 @@ process.on('message', (raw: unknown) => {
     try {
       storage = new Storage(resolveDataRoot(process.env.AIAPPNEST_DATA_ROOT));
       providers = new ProviderService(storage, new CredentialService(storage.paths, join(__dirname, 'credential-host.exe')));
+      apps = new AppService(storage, providers);
     }
     catch {
       send({ kind: 'fatal', error: publicError('STORAGE_UNAVAILABLE') });
@@ -46,6 +49,8 @@ process.on('message', (raw: unknown) => {
     send({ kind: 'response', id: message.id, result: { ok: true, value: { text: message.input.text, pid: process.pid, nodeVersion: process.versions.node } } });
   } else if (message.kind === 'providers' && ready) {
     void providers!.request(message.input).then(result => send({ kind: 'providers-response', id: message.id, result }));
+  } else if (message.kind === 'apps' && ready) {
+    send({ kind: 'apps-response', id: message.id, result: apps!.request(message.input) });
   } else {
     send({ kind: 'fatal', error: publicError('PROTOCOL_ERROR') });
     process.disconnect();

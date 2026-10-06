@@ -28,10 +28,10 @@ export interface RevisionConfig {
   memory: { enabled: boolean; maxItems: number; tokenBudget: number };
   permissions: { mode: 'chat' | 'controlled-files' | 'trusted-automation'; shell: boolean };
 }
-/** Stored revisions are published snapshots. Draft configuration belongs to a future editor. */
+/** Published configuration is immutable. Editable drafts are stored separately. */
 export interface AppRevision {
   id: RevisionId; appId: AppId; revision: number; providerProfileId: ProviderId;
-  config: RevisionConfig; roleText: string; runtimeVersion: string; createdAt: Timestamp;
+  config: RevisionConfig | import('./app-config').AppConfig; roleText: string; runtimeVersion: string; createdAt: Timestamp;
 }
 export interface Skill {
   id: SkillId; version: string; hash: string; sourcePath: string;

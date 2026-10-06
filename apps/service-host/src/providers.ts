@@ -24,6 +24,14 @@ export class ProviderService {
     if (profile.revision !== identity.revision) throw new DomainError('VERSION_CONFLICT');
     return profile;
   }
+  /** Resolve a rotated credential only for the frozen endpoint and authentication boundary. */
+  snapshotRuntime(providerId: string, frozen: import('@aiappnest/contracts').ProviderConfig): ProviderRuntime {
+    const profile = this.storage.providers.get({ id: id<'provider'>(providerId) });
+    const config = providerConfigSchema.parse(frozen);
+    if (profile.endpoint !== config.endpoint || profile.providerType !== config.providerType || profile.authMode !== config.authMode) throw new CredentialError();
+    if (config.authMode === 'api-key' && !profile.secretRef) throw new CredentialError();
+    return buildRuntime(config, config.authMode === 'api-key' ? this.credentials.read(profile.secretRef!) : undefined);
+  }
   /** Internal entry point for future PiAdapter calls; never exposed over IPC. */
   runtime(identity: ProviderIdentity): ProviderRuntime {
     const profile = this.current(identity);
