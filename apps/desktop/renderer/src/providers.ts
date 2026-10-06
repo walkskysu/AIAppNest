@@ -83,7 +83,7 @@ export const ProviderSettings = defineComponent({
     ]);
     return () => h('section', { class: 'card provider-settings' }, [
       h('h2', '模型设置'),
-      h('p', '支持 OpenAI 官方文本模型及本机 OpenAI 兼容文本接口；其他兼容服务未认证。模型 ID 手动输入。'),
+      h('p', '支持 OpenAI、DeepSeek 官方文本模型及本机 OpenAI 兼容文本接口；模型 ID 手动输入，保存不代表已通过测试。'),
       h('fieldset', { disabled: busy.value || !props.ready }, [
         h('div', { class: 'actions' }, [h('button', { class: 'secondary', onClick: () => choose() }, '新增模型'), h('button', { class: 'secondary', onClick: load }, '重新加载')]),
         h('ul', { class: 'provider-list' }, profiles.value.map(p => h('li', { key: p.id }, h('button', { class: 'secondary', onClick: () => choose(p) }, `${p.name} · ${p.modelId || '待配置'} · v${p.revision}`)))),
@@ -91,12 +91,12 @@ export const ProviderSettings = defineComponent({
           field('显示名称', 'name'),
           h('label', ['协议', h('select', { 'aria-label': '协议', value: config.providerType, onChange: (e: Event) => {
             config.providerType = (e.target as HTMLSelectElement).value as ProviderConfig['providerType'];
-            config.endpoint = config.providerType === 'openai' ? 'https://api.openai.com/v1' : 'http://127.0.0.1:11434/v1';
-            config.authMode = config.providerType === 'openai' ? 'api-key' : 'none'; clearKey();
-          } }, [h('option', { value: 'openai' }, 'OpenAI 官方'), h('option', { value: 'local-openai' }, '本地 OpenAI 兼容（预览）')])]),
+            config.endpoint = config.providerType === 'openai' ? 'https://api.openai.com/v1' : config.providerType === 'deepseek' ? 'https://api.deepseek.com' : 'http://127.0.0.1:11434/v1';
+            config.authMode = config.providerType === 'local-openai' ? 'none' : 'api-key'; clearKey();
+          } }, [h('option', { value: 'openai' }, 'OpenAI 官方'), h('option', { value: 'deepseek' }, 'DeepSeek 官方'), h('option', { value: 'local-openai' }, '本地 OpenAI 兼容（预览）')])]),
           field('端点', 'endpoint'), field('模型 ID', 'modelId'),
           h('label', ['认证方式', h('select', { 'aria-label': '认证方式', value: config.authMode, onChange: (e: Event) => { config.authMode = (e.target as HTMLSelectElement).value as ProviderConfig['authMode']; clearKey(); } }, [
-            h('option', { value: 'api-key' }, 'API Key'), h('option', { value: 'none', disabled: config.providerType === 'openai' }, '无需认证'),
+            h('option', { value: 'api-key' }, 'API Key'), h('option', { value: 'none', disabled: config.providerType !== 'local-openai' }, '无需认证'),
           ])]),
           config.authMode === 'api-key' ? h('label', ['API Key', h('input', { 'aria-label': 'API Key', type: 'password', value: key.value,
             autocomplete: 'new-password', spellcheck: false, placeholder: selected.value?.hasCredential ? '已保存；留空保留原凭据' : '输入 API Key',

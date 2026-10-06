@@ -31,3 +31,16 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 .provider-list { list-style: none; padding: 0; display: grid; gap: 8px; }
 .provider-list button { text-align: left; overflow-wrap: anywhere; }
 .provider-settings .actions { flex-wrap: wrap; }
+.app-home { margin: 28px 0; }
+.app-home .actions { flex-wrap: wrap; align-items: center; margin-top: 16px; }
+.app-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; margin: 24px 0; }
+.app-card { overflow-wrap: anywhere; padding: 24px; }
+.app-home label { display: grid; gap: 6px; margin: 14px 0; }
+.app-home input, .app-home select, .app-home textarea { width: 100%; padding: 10px; border: 1px solid #c6ccdb; border-radius: 6px; background: white; color: #1c2438; font: inherit; }
+.app-home textarea { min-height: 90px; resize: vertical; }
+.app-home .check { display: flex; align-items: center; gap: 8px; }
+.app-home .check input { width: auto; }
+.app-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 24px; }
+.app-filters > input { flex: 1; min-width: 180px; }
+.app-filters select { width: auto; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }

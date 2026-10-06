@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const providerFields = {
   name: z.string().trim().min(1).max(80),
-  providerType: z.enum(['openai', 'local-openai']),
+  providerType: z.enum(['openai', 'deepseek', 'local-openai']),
   endpoint: z.string().max(256).url(),
   modelId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:/-]{0,127}$/),
   authMode: z.enum(['api-key', 'none']),
@@ -16,10 +16,12 @@ export const providerConfigSchema = z.strictObject(providerFields).superRefine((
     return;
   }
   const url = new URL(value.endpoint);
-  const clean = !url.username && !url.password && !url.search && !url.hash && /^\/v1\/?$/.test(url.pathname);
+  const clean = !url.username && !url.password && !url.search && !url.hash
+    && (value.providerType === 'deepseek' ? /^\/(v1\/?)?$/.test(url.pathname) : /^\/v1\/?$/.test(url.pathname));
   const supported = value.providerType === 'openai'
     ? url.origin === 'https://api.openai.com' && value.authMode === 'api-key'
-    : ['127.0.0.1', '[::1]'].includes(url.hostname) && ['http:', 'https:'].includes(url.protocol);
+    : value.providerType === 'deepseek' ? url.origin === 'https://api.deepseek.com' && value.authMode === 'api-key'
+      : ['127.0.0.1', '[::1]'].includes(url.hostname) && ['http:', 'https:'].includes(url.protocol);
   if (!clean || !supported) ctx.addIssue({ code: 'custom', message: 'Unsupported endpoint or authentication' });
 });
 export const providerSaveSchema = z.strictObject({

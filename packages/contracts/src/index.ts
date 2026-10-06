@@ -2,17 +2,20 @@ import { z } from 'zod';
 import { SERVICE_PROTOCOL_VERSION } from '@aiappnest/domain';
 import { providerRequestSchema, providerReplySchema, type ProviderRequest, type ProviderReply } from './providers';
 export * from './providers';
+import { appRequestSchema, appReplySchema, type AppRequest, type AppReply } from './apps';
+export * from './apps';
 
 export const errorCodeSchema = z.enum([
   'INVALID_INPUT', 'FORBIDDEN', 'NOT_READY', 'START_FAILED', 'START_TIMEOUT',
   'PROTOCOL_ERROR', 'SERVICE_EXITED', 'REQUEST_TIMEOUT', 'SHUTTING_DOWN', 'BUSY', 'STORAGE_UNAVAILABLE',
-  'VERSION_CONFLICT', 'NOT_FOUND', 'CREDENTIAL_UNAVAILABLE', 'PROVIDER_IN_USE',
+  'VERSION_CONFLICT', 'NOT_FOUND', 'CREDENTIAL_UNAVAILABLE', 'PROVIDER_IN_USE', 'APP_UNAVAILABLE',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const errorSchema = z.strictObject({ code: errorCodeSchema, message: z.string().max(200) });
 export type PublicError = z.infer<typeof errorSchema>;
 const messages: Record<ErrorCode, string> = {
-  VERSION_CONFLICT: '配置已发生变化，请重新加载后再操作。', NOT_FOUND: '模型配置不存在。',
+  APP_UNAVAILABLE: '应用已归档、尚未发布或存在活动任务，无法执行此操作。',
+  VERSION_CONFLICT: '配置已发生变化，请重新加载后再操作。', NOT_FOUND: '请求的记录不存在或不属于此应用。',
   CREDENTIAL_UNAVAILABLE: '凭据无法保存或读取，请检查 Windows 用户环境并重新输入。',
   PROVIDER_IN_USE: '此模型配置被应用版本引用，无法删除。',
   INVALID_INPUT: '请求格式无效。', FORBIDDEN: '请求来源不被允许。', NOT_READY: '服务尚未就绪。',
@@ -41,23 +44,26 @@ export const resultSchema = <T extends z.ZodType>(value: T) => z.discriminatedUn
   z.strictObject({ ok: z.literal(true), value }),
   z.strictObject({ ok: z.literal(false), error: errorSchema }),
 ]);
-export const channels = Object.freeze({ status: 'foundation:status', retry: 'foundation:retry', ping: 'foundation:ping', changed: 'foundation:changed', providers: 'providers:request' });
+export const channels = Object.freeze({ status: 'foundation:status', retry: 'foundation:retry', ping: 'foundation:ping', changed: 'foundation:changed', providers: 'providers:request', apps: 'apps:request' });
 const id = z.uuid();
 export const hostInputSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('hello'), version: z.literal(SERVICE_PROTOCOL_VERSION), nonce: id }),
   z.strictObject({ kind: z.literal('ping'), id, input: pingInputSchema }),
   z.strictObject({ kind: z.literal('providers'), id, input: providerRequestSchema }),
+  z.strictObject({ kind: z.literal('apps'), id, input: appRequestSchema }),
   z.strictObject({ kind: z.literal('shutdown') }),
 ]);
 export const hostOutputSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('ready'), version: z.literal(SERVICE_PROTOCOL_VERSION), nonce: id, pid: z.number().int().positive(), nodeVersion: z.string().max(30) }),
   z.strictObject({ kind: z.literal('response'), id, result: resultSchema(pingOutputSchema) }),
   z.strictObject({ kind: z.literal('providers-response'), id, result: resultSchema(providerReplySchema) }),
+  z.strictObject({ kind: z.literal('apps-response'), id, result: resultSchema(appReplySchema) }),
   z.strictObject({ kind: z.literal('fatal'), error: errorSchema }),
 ]);
 export type HostInput = z.infer<typeof hostInputSchema>;
 export type HostOutput = z.infer<typeof hostOutputSchema>;
 export interface DesktopAPI {
+  apps(input: AppRequest): Promise<Result<AppReply>>;
   providers(input: ProviderRequest): Promise<Result<ProviderReply>>;
   getStatus(): Promise<Result<ServiceStatus>>;
   retryService(): Promise<Result<ServiceStatus>>;

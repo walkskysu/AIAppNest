@@ -3,3 +3,4 @@ export const SERVICE_PROTOCOL_VERSION = 1;
 export type ServicePhase = 'stopped' | 'starting' | 'ready' | 'stopping' | 'failed';
 export * from './models';
 export * from './rules';
+export * from './app-config';
