@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DomainError, id, newAppConfig, timestamp, type App, type AppConfig, type AppId } from '@aiappnest/domain';
 import { appRequestSchema, appReplySchema, snapshotSchema, providerConfigSchema, publicError,
   type AppRequest, type AppReply, type AppView, type AppIssue, type AppSnapshot, type AppRevisionView, type Result, type ErrorCode } from '@aiappnest/contracts';
 import type { Storage } from '@aiappnest/storage';
 import type { ProviderService } from './providers';
+import { SkillRegistry } from './skills';
+import { packageHash, readPackage } from './skill-validation';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const runtimeVersion = '0.73.1';
@@ -13,9 +15,10 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}
 type FaultPoint = 'write' | 'renamed' | 'transaction';
 
 export class AppService {
+  private readonly skills: SkillRegistry;
   constructor(private readonly storage: Storage, private readonly providers: ProviderService,
     // Trusted test injection only; never reachable through IPC.
-    private readonly fault: (point: FaultPoint) => void = () => {}) { this.collectSnapshots(); }
+    private readonly fault: (point: FaultPoint) => void = () => {}, skills?: SkillRegistry) { this.skills = skills ?? new SkillRegistry(storage); this.collectSnapshots(); }
 
   private current(appId: string, expectedVersion?: number): App {
     const app = this.storage.apps.get({ id: id<'app'>(appId) });
@@ -62,8 +65,7 @@ export class AppService {
     if (!config.role.trim()) issues.push('ROLE_REQUIRED');
     if ((config.permissions.mode === 'chat' && config.permissions.tools.length > 0)
       || (config.permissions.mode !== 'trusted-automation' && config.permissions.tools.includes('shell'))) issues.push('PERMISSION_CONFLICT');
-    // SkillRegistry import/dependency validation is not integrated yet. Fail closed even for legacy registry rows.
-    if (config.skills.length) issues.push('SKILL_UNRESOLVED');
+    try { this.skills.checkBindings(config.skills); } catch { issues.push('SKILL_UNRESOLVED'); }
     if (!config.model) issues.push('MODEL_REQUIRED');
     else {
       let profile;
@@ -106,7 +108,25 @@ export class AppService {
     const read = (name: string) => { const file = join(root, name); this.storage.paths.assertManaged(file); return readFileSync(file, 'utf8'); };
     if (read('manifest.json') !== stored.snapshot) throw new DomainError('STORAGE_UNAVAILABLE');
     for (const resource of snapshot.resources) if (hash(read(resource.path)) !== resource.hash) throw new DomainError('STORAGE_UNAVAILABLE');
+    const enabled = snapshot.config.skills.filter(binding => binding.enabled);
+    if (enabled.length !== (snapshot.skills?.length ?? 0)) throw new DomainError('SKILL_INTEGRITY');
+    for (const binding of snapshot.config.skills) {
+      this.skills.verify(binding);
+      if (!binding.enabled) continue;
+      const resource = snapshot.skills?.find(s => s.id === binding.id && s.version === binding.version && s.sourceHash === binding.hash);
+      if (!resource) throw new DomainError('SKILL_INTEGRITY');
+      const directory = join(root,resource.path); this.storage.paths.assertManaged(directory);
+      try { if (packageHash(readPackage(directory)) !== resource.hash) throw new Error('hash'); }
+      catch { throw new DomainError('SKILL_INTEGRITY'); }
+    }
     return { id: revision.id, appId: app, revision: revision.revision, createdAt: revision.createdAt, configHash: stored.configHash, snapshot };
+  }
+  /** Future engine entry: exact revision ownership + integrity; no global discovery or extension paths. */
+  resolveSkills(appId: string, revisionId: string): { discovery: false; extensions: readonly []; paths: string[] } {
+    const revision = this.readRevision(appId,revisionId);
+    this.skills.checkBindings(revision.snapshot.config.skills);
+    const root = this.storage.paths.revision(id<'app'>(appId),id<'revision'>(revisionId));
+    return { discovery:false, extensions:[], paths:(revision.snapshot.skills ?? []).map(s => join(root,s.path,'SKILL.md')) };
   }
   private publish(app: App): void {
     if (app.status === 'archived') throw new DomainError('INVALID_TRANSITION');
@@ -123,15 +143,17 @@ export class AppService {
     const snapshot: AppSnapshot = { schemaVersion: 1, appId: app.id, revisionId, config, provider, credentialBinding: profile.id,
       protocol: 'openai-completions', runtimeVersion, roleText, validation: null,
       resources: [{ path: 'config.json', hash: hash(configText) }, { path: 'role.md', hash: hash(roleText) }] };
-    const manifest = JSON.stringify(snapshot);
     try {
       this.storage.paths.ensureDirectory(staging);
+      snapshot.skills = config.skills.filter(s => s.enabled).map(binding => ({ id:binding.id,version:binding.version,sourceHash:binding.hash,
+        ...this.skills.materialize(binding,staging) }));
+      const manifest = JSON.stringify(snapshot);
       const write = (name: string, content: string) => { const file = join(staging, name); this.storage.paths.assertManaged(file); writeFileSync(file, content, { encoding: 'utf8', flag: 'wx', flush: true }); };
       write('config.json', configText); this.fault('write');
       write('role.md', roleText); write('manifest.json', manifest);
-      this.storage.paths.assertManaged(directory); renameSync(staging, directory); this.fault('renamed');
+      this.storage.paths.publishDirectory(staging, directory); this.fault('renamed');
       this.storage.publishRevision({ id: revisionId, appId: app.id, revision: this.storage.nextRevision(app.id), providerProfileId: profile.id,
-        config, roleText, runtimeVersion, createdAt: timestamp() }, [], app.version);
+        config, roleText, runtimeVersion, createdAt: timestamp() }, config.skills.map(s => ({ revisionId,skillId:id<'skill'>(s.id),skillVersion:s.version,enabled:s.enabled })), app.version);
       this.storage.saveSnapshot(app.id, revisionId, hash(manifest), manifest);
       this.fault('transaction');
       // Re-read the complete files before the outer transaction can commit currentRevisionId.
@@ -157,7 +179,13 @@ export class AppService {
     }
     let app = this.current(request.appId, 'expectedVersion' in request ? request.expectedVersion : undefined);
     if (request.operation === 'activeRuns') return { operation: 'activeRuns', count: this.storage.activeAppRuns(app.id) };
-    if (request.operation === 'update') {
+    if (request.operation === 'bindSkills') {
+      this.skills.checkBindings(request.skills);
+      if (app.status === 'archived') throw new DomainError('INVALID_TRANSITION');
+      const draft = this.storage.appDraft(app.id);
+      app = this.storage.updateApp(app.id,app.version,{ name:app.name,description:app.description,icon:app.icon,status:app.status });
+      this.storage.saveAppDraft(app.id,{ ...draft.config,skills:request.skills },draft.category,draft.favorite);
+    } else if (request.operation === 'update') {
       app = this.storage.updateApp(app.id, app.version, { name: request.metadata.name, description: request.metadata.description,
         icon: request.metadata.icon, status: app.status });
       this.storage.saveAppDraft(app.id, request.draft, request.metadata.category, request.metadata.favorite);
@@ -166,7 +194,7 @@ export class AppService {
       const source = this.storage.appDraft(app.id), now = timestamp();
       // No model reference survives copying, even when the original profile uses no authentication.
       const config: AppConfig = { ...source.config, model: null, skills: source.config.skills.filter(skill => {
-        try { return this.storage.skills.get({ id: id<'skill'>(skill.id), version: skill.version }).hash === skill.hash; } catch { return false; }
+        try { this.skills.verify(skill); return true; } catch { return false; }
       }) };
       app = this.storage.apps.insert({ id: id<'app'>(randomUUID()), name: `${app.name.slice(0, 75)} 副本`, description: app.description,
         icon: app.icon, status: 'draft', currentRevisionId: null, version: 1, createdAt: now, updatedAt: now });
@@ -188,7 +216,7 @@ export class AppService {
     catch (error) {
       let code: ErrorCode = 'STORAGE_UNAVAILABLE';
       if (error instanceof DomainError) {
-        if (['INVALID_INPUT','NOT_FOUND','VERSION_CONFLICT'].includes(error.code)) code = error.code as ErrorCode;
+        if (['INVALID_INPUT','NOT_FOUND','VERSION_CONFLICT','SKILL_INTEGRITY'].includes(error.code)) code = error.code as ErrorCode;
         else if (error.code === 'INVALID_TRANSITION') code = 'APP_UNAVAILABLE';
       }
       return { ok: false, error: publicError(code) };

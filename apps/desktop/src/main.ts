@@ -1,7 +1,8 @@
-import { app, BrowserWindow, ipcMain, protocol, session, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, protocol, session, type IpcMainInvokeEvent } from 'electron';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join, extname } from 'node:path';
-import { channels, emptySchema, publicError, type Result, type ServiceStatus } from '@aiappnest/contracts';
+import { channels, emptySchema, publicError, skillRequestSchema, type Result, type ServiceStatus } from '@aiappnest/contracts';
 import { ServiceManager } from './service-manager';
 
 declare const __DEV__: boolean;
@@ -60,10 +61,32 @@ if (!app.requestSingleInstanceLock()) {
     handle(channels.ping, (raw) => service!.ping(raw));
     handle(channels.providers, (raw) => service!.providers(raw));
     handle(channels.apps, (raw) => service!.apps(raw));
+    // Identity belongs to this Main document generation; the renderer cannot supply it.
+    let skillOwner = randomUUID(), choosingSkill = false;
+    ipcMain.handle(channels.selectSkill, async (event, raw: unknown) => {
+      if (!trusted(event)) return { ok:false,error:publicError('FORBIDDEN') };
+      if (!emptySchema.safeParse(raw).success) return { ok:false,error:publicError('INVALID_INPUT') };
+      if (choosingSkill) return { ok:false,error:publicError('BUSY') };
+      choosingSkill = true; const owner = skillOwner;
+      try {
+        const result = await dialog.showOpenDialog(window!, { title:'导入 Skill 文件夹',properties:['openDirectory'] });
+        if (!trusted(event) || owner !== skillOwner) return { ok:false,error:publicError('FORBIDDEN') };
+        if (result.canceled || !result.filePaths[0]) return { ok:true,value:null };
+        const reply = await service!.skills({ operation:'select',path:result.filePaths[0],owner,scope:'skill-import' });
+        return reply.ok ? reply.value.operation === 'select' ? { ok:true,value:reply.value.selection } : { ok:false,error:publicError('PROTOCOL_ERROR') } : reply;
+      } finally { choosingSkill = false; }
+    });
+    handle(channels.skills, async raw => {
+      const parsed = skillRequestSchema.safeParse(raw);
+      if (!parsed.success) return { ok:false,error:publicError('INVALID_INPUT') };
+      const reply = await service!.skills({ operation:'request',owner:skillOwner,request:parsed.data });
+      return reply.ok ? reply.value.operation === 'request' ? { ok:true,value:reply.value.reply } : { ok:false,error:publicError('PROTOCOL_ERROR') } : reply;
+    });
     window = new BrowserWindow({ width: 1000, height: 720, minWidth: 640, minHeight: 480, backgroundColor: '#f5f6fa', show: false,
       webPreferences: { preload: join(root, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false, webSecurity: true, allowRunningInsecureContent: false, webviewTag: false, devTools: __DEV__ },
     });
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    window.webContents.on('did-start-navigation', (_event, _url, _inPlace, mainFrame) => { if (mainFrame) skillOwner = randomUUID(); });
     window.webContents.on('will-navigate', (event) => event.preventDefault());
     window.webContents.on('will-attach-webview', (event) => event.preventDefault());
     window.on('closed', () => { window = null; });

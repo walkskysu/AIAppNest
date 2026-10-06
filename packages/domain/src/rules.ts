@@ -1,5 +1,5 @@
 import type { Id, MessageStatus, RunState, Timestamp } from './models';
-export type DomainErrorCode = 'NOT_FOUND' | 'OWNERSHIP_MISMATCH' | 'VERSION_CONFLICT' | 'DUPLICATE_RECORD' | 'INVALID_TRANSITION' | 'INVALID_INPUT' | 'STORAGE_UNAVAILABLE';
+export type DomainErrorCode = 'NOT_FOUND' | 'OWNERSHIP_MISMATCH' | 'VERSION_CONFLICT' | 'DUPLICATE_RECORD' | 'INVALID_TRANSITION' | 'INVALID_INPUT' | 'STORAGE_UNAVAILABLE' | 'SKILL_INTEGRITY' | 'SKILL_IN_USE' | 'FORBIDDEN';
 export class DomainError extends Error {
   constructor(public readonly code: DomainErrorCode, message: string = code, options?: ErrorOptions) { super(message, options); this.name = 'DomainError'; }
 }

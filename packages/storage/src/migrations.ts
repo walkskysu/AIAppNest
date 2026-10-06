@@ -175,6 +175,16 @@ CREATE TRIGGER archived_conversation BEFORE INSERT ON conversations WHEN (SELECT
 CREATE TRIGGER archive_active BEFORE UPDATE OF status ON apps WHEN NEW.status='archived' AND EXISTS(
  SELECT 1 FROM runs WHERE appId=NEW.id AND state IN ('queued','starting','running','waiting_approval','cancelling'))
  BEGIN SELECT RAISE(ABORT, 'invalid transition'); END;
+` }, { version: 4, name: 'skill-import-registry', sql: `
+CREATE TABLE skill_registry (
+ id TEXT NOT NULL, version TEXT NOT NULL, detail TEXT NOT NULL CHECK(json_valid(detail)),
+ PRIMARY KEY(id,version), FOREIGN KEY(id,version) REFERENCES skills(id,version)
+) STRICT;
+CREATE TRIGGER skill_registry_immutable_update BEFORE UPDATE ON skill_registry BEGIN SELECT RAISE(ABORT, 'immutable'); END;
+DROP TRIGGER skills_immutable_delete;
+CREATE TRIGGER skills_referenced_delete BEFORE DELETE ON skills WHEN EXISTS(
+ SELECT 1 FROM app_skills WHERE skillId=OLD.id AND skillVersion=OLD.version)
+ BEGIN SELECT RAISE(ABORT, 'ownership mismatch'); END;
 ` }];
 
 export function migrate(db: DatabaseSync, steps: readonly Migration[] = migrations): void {

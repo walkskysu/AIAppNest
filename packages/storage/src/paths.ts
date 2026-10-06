@@ -1,4 +1,4 @@
-import { mkdirSync, lstatSync } from 'node:fs';
+import { existsSync, mkdirSync, lstatSync, renameSync } from 'node:fs';
 import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import { DomainError, id, type AppId, type ArtifactId, type ConversationId, type RevisionId, type SkillId } from '@aiappnest/domain';
 
@@ -39,4 +39,16 @@ export class DataPaths {
     }
   }
   ensureDirectory(path: string): void { this.assertManaged(path); mkdirSync(path, { recursive: true }); this.assertManaged(path); }
+  /** Windows scanners can briefly hold newly flushed descendants. Never overwrite or replay a DB operation. */
+  publishDirectory(staging: string, destination: string): void {
+    for (let attempt = 0; ; attempt++) {
+      this.assertManaged(staging); this.assertManaged(destination);
+      if (existsSync(destination)) throw new DomainError('VERSION_CONFLICT');
+      try { renameSync(staging,destination); return; }
+      catch (error) {
+        if (process.platform !== 'win32' || attempt >= 4 || !['EPERM','EACCES','EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,25 * 2 ** attempt);
+      }
+    }
+  }
 }

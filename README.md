@@ -34,6 +34,8 @@ npm.cmd test        # 类型检查、生产构建、真实进程测试及已有 
 
 ## 本地持久化
 
+“技能库”通过系统文件夹选择导入 Skill，展示静态校验、脚本清单、依赖检测和权限声明；导入不会执行或安装脚本。应用草稿可选择明确版本、启用/禁用及自动/显式调用，发布后固定 ID、版本和 SHA-256。源包升级不改变旧版本；源包或快照篡改阻止解析，历史引用阻止删除。示例目录为 `tests/fixtures/skills/reference-helper`，详见 [Skill 规则与检测边界](docs/technical/skill-architecture.md)及 [K01–K10 验证记录](docs/technical/skill-validation.md)。
+
 首页无需编辑 JSON 即可创建、搜索、收藏、编辑、复制和归档应用。基础编辑使用草稿乐观锁，发布生成不可变快照；旧会话不随新版本升级。复制清空模型关联和外部目录授权，需重新配置。打开只进入应用空间，不启动 Worker。“可使用（配置就绪）”不代表通过模型连接或端到端试运行。详见[版本与补偿规则](docs/technical/app-architecture.md)和[A01–A10 验证记录](docs/technical/app-validation.md)。
 
 “模型设置”可添加 OpenAI 官方、DeepSeek 官方或本地回环 OpenAI 兼容文本模型。选择 DeepSeek 会填入 `https://api.deepseek.com` 和 `deepseek-flash`；在密码控件输入对应 Key，保存后显式点击“测试模型连接”，超时可设为 60000 ms。保存不产生模型调用，测试可能产生少量费用，仅验证非思考文本连接。数据库仅存凭据引用，测试使用锁定的 Pi 0.73.1。支持范围、凭据生命周期和失败补偿见[Provider 架构](docs/technical/provider-architecture.md)，自动测试与尚待真实模型验收的记录见[P01–P18 / D01–D11](docs/technical/provider-validation.md)。兼容本地接入当前为预览，不代表任意兼容服务已认证。

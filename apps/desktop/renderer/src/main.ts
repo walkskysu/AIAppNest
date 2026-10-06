@@ -3,6 +3,7 @@ import type { ServiceStatus } from '@aiappnest/contracts';
 import './style.css';
 import { ProviderSettings } from './providers';
 import { ApplicationHome } from './apps';
+import { SkillLibrary } from './skills';
 
 createApp(defineComponent({
   setup() {
@@ -10,6 +11,7 @@ createApp(defineComponent({
     const diagnostic = ref('');
     const busy = ref(false);
     const settings = ref(false);
+    const library = ref(false);
     const names = { stopped: '已停止', starting: '正在启动', ready: '服务就绪', stopping: '正在停止', failed: '服务异常' };
     const update = (next: ServiceStatus) => { if (next.revision >= status.value.revision) status.value = next; };
     let unsubscribe: (() => void) | undefined;
@@ -37,6 +39,8 @@ createApp(defineComponent({
       h('header', [h('span', { class: 'brand' }, 'AIAppNest'), h('span', { class: 'tag' }, '应用工作台')]),
       h('button', { class: 'secondary', onClick: () => { settings.value = !settings.value; }, disabled: status.value.phase !== 'ready' }, settings.value ? '关闭模型设置' : '模型设置'),
       settings.value ? h(ProviderSettings, { ready: status.value.phase === 'ready' }) : null,
+      h('button',{ class:'secondary',onClick:() => { library.value = !library.value; },disabled:status.value.phase !== 'ready' },library.value ? '关闭技能库':'技能库'),
+      library.value ? h(SkillLibrary,{ ready:status.value.phase === 'ready' }) : null,
       h(ApplicationHome, { ready: status.value.phase === 'ready' }),
       h('section', { class: 'card' }, [
         h('div', { class: 'status-line' }, [h('span', { class: `dot ${status.value.phase}` }), h('h2', { 'data-testid': 'phase', 'data-phase': status.value.phase, role: 'status' }, names[status.value.phase])]),
@@ -47,7 +51,7 @@ createApp(defineComponent({
         ]),
         h('p', { class: 'diagnostic', 'data-testid': 'diagnostic', role: 'status' }, diagnostic.value),
       ]),
-      h('section', { class: 'boundary' }, [h('h2', '当前可用'), h('p', '应用管理 · 配置版本 · 模型配置 · 凭据保护 · 手动连接测试'), h('h2', '后续接入'), h('p', '试运行、聊天与 Pi 会话执行尚未实现。'), h('p', '关闭窗口将停止服务；服务异常后不会自动重放请求。')]),
+      h('section', { class: 'boundary' }, [h('h2', '当前可用'), h('p', '应用管理 · 配置版本 · 技能库 · 模型配置 · 凭据保护 · 手动连接测试'), h('h2', '后续接入'), h('p', '试运行、聊天与 Pi 会话执行尚未实现。'), h('p', '关闭窗口将停止服务；服务异常后不会自动重放请求。')]),
     ]);
   },
 })).mount('#app');
