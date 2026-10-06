@@ -44,3 +44,6 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 .app-filters > input { flex: 1; min-width: 180px; }
 .app-filters select { width: auto; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+[data-testid="skill-library"] { overflow-wrap: anywhere; margin: 24px 0; }
+[data-testid="skill-library"] button { margin: 4px 8px 4px 0; }
+[data-testid="skill-library"] li { margin: 10px 0; }

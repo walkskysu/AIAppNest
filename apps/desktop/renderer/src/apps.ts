@@ -1,10 +1,10 @@
 import { defineComponent, h, onMounted, reactive, ref, watch } from 'vue';
-import { newAppConfig, type AppView, type AppIssue, type AppRequest, type AppReply, type ProviderView } from '@aiappnest/contracts';
+import { newAppConfig, type AppView, type AppIssue, type AppRequest, type AppReply, type ProviderView, type SkillView } from '@aiappnest/contracts';
 
 const states = { usable: '可使用（配置就绪）', incomplete: '配置未完成', 'missing-dependencies': '缺少依赖', archived: '已归档' };
 const reasons: Record<AppIssue, string> = { MODEL_REQUIRED: '请重新选择并确认模型关联', PROVIDER_MISSING: '模型配置不存在',
   PROVIDER_CHANGED: '模型配置已变化，请重新选择确认', MODEL_INVALID: '模型设置无效', CREDENTIAL_UNAVAILABLE: '模型凭据缺失、不可读取或端点已变化',
-  SKILL_UNRESOLVED: 'Skill 导入尚未接入，无法解析绑定', PERMISSION_CONFLICT: '工具需求与权限模式冲突', ROLE_REQUIRED: '请填写角色说明',
+  SKILL_UNRESOLVED: 'Skill 绑定缺失、完整性异常、名称冲突或缺少依赖', PERMISSION_CONFLICT: '工具需求与权限模式冲突', ROLE_REQUIRED: '请填写角色说明',
   SNAPSHOT_UNAVAILABLE: '版本快照缺失或损坏', NOT_PUBLISHED: '尚未发布配置版本' };
 const icons = { spark: '✦', code: '⌘', book: '▤', pen: '✎' };
 const metadata = (app?: AppView) => ({ name: app?.name ?? '', description: app?.description ?? '',
@@ -16,6 +16,12 @@ export const ApplicationHome = defineComponent({
     const selected = ref<AppView>(), editing = ref(false), space = ref<AppView>();
     const form = reactive(metadata()), draft = ref(newAppConfig()), profiles = ref<ProviderView[]>([]);
     const busy = ref(false), feedback = ref(''), dirty = ref(false);
+    const skillOptions = ref<SkillView[]>([]), skillOffset = ref(0), skillTotal = ref(0);
+    const loadSkills = async () => {
+      const result = await window.desktop.skills({ operation:'list',limit:100,offset:skillOffset.value });
+      if (!result.ok) throw new Error(result.error.message);
+      if (result.value.operation === 'list') { skillOptions.value = result.value.skills; skillTotal.value = result.value.total; }
+    };
     const call = async (request: AppRequest): Promise<AppReply> => {
       const result = await window.desktop.apps(request);
       if (!result.ok) throw new Error(result.error.message);
@@ -39,6 +45,7 @@ export const ApplicationHome = defineComponent({
       const result = await window.desktop.providers({ operation: 'list' });
       if (result.ok && result.value.operation === 'list') profiles.value = result.value.profiles;
       else if (!result.ok) throw new Error(result.error.message);
+      skillOffset.value = 0; await loadSkills();
     };
     const save = async () => {
       let app = selected.value;
@@ -89,7 +96,21 @@ export const ApplicationHome = defineComponent({
             h('p', '先在模型设置中配置模型及凭据。复制应用后必须重新选择。此处保存或发布不会发起连接测试。'),
             draft.value.model ? h('div', { class: 'form-grid' }, [number('温度', draft.value.model.temperature, v => { draft.value.model!.temperature = v; }, 0, 2, 0.1),
               number('最大输出 token', draft.value.model.maxOutputTokens, v => { draft.value.model!.maxOutputTokens = v; }, 1, 32768)]) : null,
-            h('p', `Skill 导入尚未接入；当前 ${draft.value.skills.length} 个绑定。无 Skill 可发布；未解析绑定会阻止发布。`),
+            h('h3','Skill 版本绑定'),
+            h('label',['选择 Skill 版本',h('select',{ 'aria-label':'选择 Skill 版本',value:'',onChange:(e: Event) => {
+              const skill = skillOptions.value.find(s => `${s.id}:${s.version}` === (e.target as HTMLSelectElement).value);
+              if (skill) { draft.value.skills = [...draft.value.skills.filter(s => s.id !== skill.id),{ id:skill.id,version:skill.version,hash:skill.sha256,enabled:true,invocationMode:'automatic' }]; change(); }
+            } },[h('option',{ value:'' },'从技能库添加确定版本'),...skillOptions.value.map(s => h('option',{ value:`${s.id}:${s.version}` },`${s.name} · ${s.version} · ${s.id} · ${s.source}`))])]),
+            button('刷新 Skill 选项',loadSkills),
+            button('上一页 Skill 选项',async () => { skillOffset.value -= 100; await loadSkills(); },skillOffset.value === 0),
+            button('下一页 Skill 选项',async () => { skillOffset.value += 100; await loadSkills(); },skillOffset.value + 100 >= skillTotal.value),
+            ...draft.value.skills.map(binding => h('div',[
+              h('p',`${binding.id} · ${binding.version} · ${binding.hash}`),
+              check(`启用 ${binding.id}`,binding.enabled,v => { binding.enabled = v; }),
+              h('label',['调用模式',h('select',{ 'aria-label':`调用模式 ${binding.id}`,value:binding.invocationMode,onChange:(e: Event) => { binding.invocationMode = (e.target as HTMLSelectElement).value as 'explicit'|'automatic'; change(); } },[
+                h('option',{ value:'automatic' },'自动匹配'),h('option',{ value:'explicit' },'显式调用'),
+              ])]), button('移除绑定',async () => { draft.value.skills = draft.value.skills.filter(s => s.id !== binding.id); change(); }),
+            ])),
             draft.value.skills.length ? button('清除 Skill 绑定', async () => { draft.value.skills = []; change(); }) : null,
             h('label', ['权限模式', h('select', { 'aria-label': '权限模式', value: draft.value.permissions.mode, onChange: (e: Event) => {
               draft.value.permissions.mode = (e.target as HTMLSelectElement).value as typeof draft.value.permissions.mode; change();

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { channels, pingInputSchema, pingOutputSchema, publicError, resultSchema, statusSchema, type DesktopAPI, type ServiceStatus } from '@aiappnest/contracts';
 import { providerRequestSchema, providerReplySchema } from '@aiappnest/contracts';
 import { appRequestSchema, appReplySchema } from '@aiappnest/contracts';
+import { skillRequestSchema, skillReplySchema, skillSelectionSchema } from '@aiappnest/contracts';
 
 const callbacks = new Set<(status: ServiceStatus) => void>();
 // One native listener per document, regardless of Vue component subscription count.
@@ -12,6 +13,16 @@ const listener = (_event: unknown, raw: unknown) => {
 ipcRenderer.on(channels.changed, listener);
 window.addEventListener('unload', () => { callbacks.clear(); ipcRenderer.removeListener(channels.changed, listener); });
 const api: DesktopAPI = {
+  selectSkillDirectory: async () => {
+    const parsed = resultSchema(skillSelectionSchema).safeParse(await ipcRenderer.invoke(channels.selectSkill,{}));
+    return parsed.success ? parsed.data : { ok:false,error:publicError('PROTOCOL_ERROR') };
+  },
+  skills: async input => {
+    const parsed = skillRequestSchema.safeParse(input);
+    if (!parsed.success) return { ok:false,error:publicError('INVALID_INPUT') };
+    const reply = resultSchema(skillReplySchema).safeParse(await ipcRenderer.invoke(channels.skills,parsed.data));
+    return reply.success && (!reply.data.ok || reply.data.value.operation === parsed.data.operation) ? reply.data : { ok:false,error:publicError('PROTOCOL_ERROR') };
+  },
   apps: async input => {
     const parsed = appRequestSchema.safeParse(input);
     if (!parsed.success) return { ok: false, error: publicError('INVALID_INPUT') };

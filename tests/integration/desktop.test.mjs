@@ -4,7 +4,7 @@ import { _electron as electron } from '@playwright/test';
 import electronPath from 'electron';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, cp, rm, rename, writeFile } from 'node:fs/promises';
+import { mkdtemp, cp, rm, rename, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { createServer } from 'node:http';
 
@@ -28,6 +28,36 @@ async function launch(t, root = resolve('dist')) {
   return { app, page, profile };
 }
 async function ready(page) { await page.waitForFunction(() => document.querySelector('[data-testid="phase"]')?.getAttribute('data-phase') === 'ready'); }
+
+test('K01/K04 desktop library imports through Main dialog token and edits exact version/mode bindings', { timeout:60000 }, async t => {
+  const { app,page,profile } = await launch(t); await ready(page);
+  const source = join(profile,'中文 Skill 源包'); await mkdir(source);
+  await writeFile(join(source,'SKILL.md'),'---\nname: ui-skill\ndescription: 桌面导入样例\nallowed-tools: shell\n---\nNo scripts.');
+  // Simulate only the OS picker result in trusted Main; the production preload/IPC/service remain real.
+  await app.evaluate(({ dialog },path) => { dialog.showOpenDialog = async () => ({ canceled:false,filePaths:[path] }); },source);
+  await page.getByRole('button',{ name:'技能库',exact:true }).click();
+  await page.getByRole('button',{ name:'导入 Skill 文件夹',exact:true }).click();
+  await page.getByTestId('skill-library').getByText('导入成功。',{ exact:true }).waitFor();
+  await page.getByTestId('skill-report').getByText('静态校验通过',{ exact:true }).waitFor();
+  await page.getByTestId('skill-report').getByText('allowed-tools：shell。这些声明不授予实际工具权限。',{ exact:true }).waitFor();
+  const result = await page.evaluate(() => window.desktop.skills({ operation:'list',limit:100,offset:0 }));
+  assert.equal(result.ok,true); const skill = result.value.skills[0]; assert.equal(skill.versionOrigin,'platform');
+  assert.equal((await page.evaluate(path => window.desktop.skills({ operation:'import',path }),source)).error.code,'INVALID_INPUT');
+  await page.getByRole('button',{ name:'创建应用',exact:true }).click();
+  await page.getByLabel('应用名称',{ exact:true }).fill('Skill 绑定应用');
+  await page.getByLabel('选择 Skill 版本',{ exact:true }).selectOption(`${skill.id}:${skill.version}`);
+  await page.getByLabel(`调用模式 ${skill.id}`,{ exact:true }).selectOption('explicit');
+  await page.getByLabel(`启用 ${skill.id}`,{ exact:true }).uncheck();
+  await page.getByRole('button',{ name:'保存应用草稿',exact:true }).click();
+  await page.getByTestId('app-feedback').filter({ hasText:'草稿已保存' }).waitFor();
+  const apps = await page.evaluate(() => window.desktop.apps({ operation:'list',query:'',archived:false,sort:'name',limit:100,offset:0 }));
+  assert.equal(apps.value.apps[0].draft.skills[0].hash,skill.sha256); assert.equal(apps.value.apps[0].draft.skills[0].enabled,false);
+  assert.equal(apps.value.apps[0].draft.skills[0].invocationMode,'explicit'); assert.deepEqual(apps.value.apps[0].draft.permissions.tools,[]);
+  await page.reload(); await ready(page); await page.getByRole('button',{ name:'技能库',exact:true }).click();
+  await page.getByTestId('skill-library').getByRole('button',{ name:'查看详情',exact:true }).click();
+  await page.getByRole('button',{ name:'重新校验完整性与依赖',exact:true }).click();
+  await page.getByTestId('skill-report').getByText('静态校验通过',{ exact:true }).waitFor();
+});
 
 test('A01/A02/A07/A08 desktop app management uses forms, persists after service restart and opens no Worker', { timeout: 60000 }, async t => {
   const { page } = await launch(t); await ready(page);
@@ -201,7 +231,7 @@ test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload 
   const initial = await page.evaluate(() => window.desktop.getStatus());
   const pid = initial.value.pid;
   const surface = await page.evaluate(() => ({ keys: Object.keys(window.desktop).sort(), require: typeof window.require, process: typeof window.process, ipc: typeof window.ipcRenderer }));
-  assert.deepEqual(surface, { keys: ['apps', 'getStatus', 'onStatusChanged', 'ping', 'providers', 'retryService'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
+  assert.deepEqual(surface, { keys: ['apps', 'getStatus', 'onStatusChanged', 'ping', 'providers', 'retryService', 'selectSkillDirectory', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
   const prefs = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences());
   for (const key of ['sandbox', 'contextIsolation', 'webSecurity']) assert.equal(prefs[key], true);
   for (const key of ['nodeIntegration', 'nodeIntegrationInWorker', 'nodeIntegrationInSubFrames', 'webviewTag', 'allowRunningInsecureContent']) assert.equal(prefs[key], false, key);

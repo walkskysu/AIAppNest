@@ -21,6 +21,10 @@ export const snapshotSchema = z.strictObject({ schemaVersion: z.literal(1), appI
   resources: z.array(z.strictObject({ path: z.enum(['config.json', 'role.md']), hash: z.string().regex(/^[0-9a-f]{64}$/) })).length(2),
   // Only a future trusted trial service may supply an association. No renderer-writable PASS field.
   validation: z.null(),
+  skills: z.array(z.strictObject({ id: uuid, version: z.string().regex(/^\d+\.\d+\.\d+$/).max(40),
+    path: z.string().regex(/^skills\/[0-9a-f-]{36}\/\d+\.\d+\.\d+\/[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    hash: z.string().regex(/^[0-9a-f]{64}$/), sourceHash: z.string().regex(/^[0-9a-f]{64}$/),
+  })).max(100).optional(),
 });
 export type AppSnapshot = z.infer<typeof snapshotSchema>;
 export const appRevisionViewSchema = z.strictObject({ id: uuid, appId: uuid, revision: version,
@@ -33,6 +37,7 @@ export const appRequestSchema = z.discriminatedUnion('operation', [
   z.strictObject({ operation: z.literal('get'), appId: uuid }),
   z.strictObject({ operation: z.literal('update'), ...appIdentitySchema.shape, metadata: appMetadataSchema, draft: appConfigSchema }),
   z.strictObject({ operation: z.literal('publish'), ...appIdentitySchema.shape }),
+  z.strictObject({ operation: z.literal('bindSkills'), ...appIdentitySchema.shape, skills: appConfigSchema.shape.skills }),
   z.strictObject({ operation: z.literal('copy'), ...appIdentitySchema.shape }),
   z.strictObject({ operation: z.literal('archive'), ...appIdentitySchema.shape, archived: z.boolean() }),
   z.strictObject({ operation: z.literal('open'), appId: uuid }),
@@ -42,7 +47,7 @@ export const appRequestSchema = z.discriminatedUnion('operation', [
 export type AppRequest = z.infer<typeof appRequestSchema>;
 export const appReplySchema = z.discriminatedUnion('operation', [
   z.strictObject({ operation: z.literal('list'), apps: z.array(appViewSchema).max(100), total: z.number().int().nonnegative() }),
-  ...(['create', 'get', 'update', 'publish', 'copy', 'archive', 'open'] as const).map(operation => z.strictObject({ operation: z.literal(operation), app: appViewSchema })),
+  ...(['create', 'get', 'update', 'publish', 'copy', 'archive', 'open', 'bindSkills'] as const).map(operation => z.strictObject({ operation: z.literal(operation), app: appViewSchema })),
   z.strictObject({ operation: z.literal('revision'), revision: appRevisionViewSchema }),
   z.strictObject({ operation: z.literal('activeRuns'), count: z.number().int().nonnegative() }),
 ]);

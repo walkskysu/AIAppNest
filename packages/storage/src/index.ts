@@ -75,6 +75,32 @@ export class Storage {
   }
 
   /** Draft changes share apps.version with metadata, publication and archive operations. */
+  saveSkillDetail(skill: Skill, detail: string): void {
+    this.transaction(() => {
+      this.skills.insert(skill);
+      this.db.prepare('INSERT INTO skill_registry VALUES(?,?,?)').run(skill.id, skill.version, detail);
+    });
+  }
+  skillDetail(skillId: Skill['id'], version: string): string {
+    this.skills.get({ id: skillId, version });
+    const row = this.db.prepare('SELECT detail FROM skill_registry WHERE id=? AND version=?').get(skillId,version);
+    if (!row) throw new DomainError('NOT_FOUND');
+    return row.detail as string;
+  }
+  listSkillDetails(limit: number, offset: number): { details: string[]; total: number } {
+    return { details: this.db.prepare('SELECT detail FROM skill_registry ORDER BY id,version LIMIT ? OFFSET ?').all(limit,offset).map(r => r.detail as string),
+      total: this.db.prepare('SELECT count(*) AS n FROM skill_registry').get()!.n as number };
+  }
+  deleteSkill(skillId: Skill['id'], version: string): void {
+    this.transaction(() => {
+      this.skills.get({ id: skillId, version });
+      if (this.db.prepare('SELECT 1 FROM app_skills WHERE skillId=? AND skillVersion=? LIMIT 1').get(skillId,version)) throw new DomainError('SKILL_IN_USE');
+      // Old configurations may predate app_skills population; preserve those references too.
+      if (this.db.prepare("SELECT 1 FROM app_revisions r, json_each(r.config,'$.skills') s WHERE json_extract(s.value,'$.id')=? AND json_extract(s.value,'$.version')=? LIMIT 1").get(skillId,version)) throw new DomainError('SKILL_IN_USE');
+      this.db.prepare('DELETE FROM skill_registry WHERE id=? AND version=?').run(skillId,version);
+      this.db.prepare('DELETE FROM skills WHERE id=? AND version=?').run(skillId,version);
+    });
+  }
   appDraft(appId: AppId): { config: AppConfig; category: string; favorite: boolean; lastOpenedAt: number | null } {
     this.apps.get({ id: appId });
     const row = this.db.prepare('SELECT * FROM app_drafts WHERE appId=?').get(appId);
