@@ -3,6 +3,7 @@ import type { ProviderConfig } from '@aiappnest/contracts';
 
 /** Trusted service/worker only: never serialize this object into IPC replies or logs. */
 export interface ProviderRuntime {
+  providerType: ProviderConfig['providerType'];
   model: Model<'openai-completions'>;
   apiKey: string;
   authMode: ProviderConfig['authMode'];
@@ -17,6 +18,7 @@ export function buildRuntime(config: ProviderConfig, key: string | undefined, ba
     env.AIAPPNEST_MODEL_API_KEY = key;
   }
   return {
+    providerType: config.providerType,
     model: { id: config.modelId, name: config.modelId, api: 'openai-completions', provider: 'aiappnest',
       baseUrl: config.endpoint, reasoning: false, input: ['text'], contextWindow: 8192, maxTokens: 128,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

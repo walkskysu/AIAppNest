@@ -126,6 +126,9 @@ test('P17 production settings: manual save/probe, revision invalidation and tran
   await page.getByLabel('模型 ID', { exact: true }).fill('edited-model');
   assert.equal(await page.getByTestId('provider-result').count(), 0);
   assert.equal(await page.getByRole('button', { name: '测试模型连接', exact: true }).isDisabled(), true);
+  await page.getByLabel('模型 ID', { exact: true }).fill('test-model');
+  assert.equal(await page.getByTestId('provider-result').count(), 0);
+  await page.getByLabel('模型 ID', { exact: true }).fill('edited-model');
   await page.getByLabel('认证方式', { exact: true }).selectOption('api-key');
   await page.getByLabel('API Key', { exact: true }).fill('transient-ui-test-key');
   // Invalid request must still clear the password immediately and never touch browser storage.
@@ -148,6 +151,47 @@ test('P17 production settings: manual save/probe, revision invalidation and tran
   assert.equal(await page.getByLabel('API Key', { exact: true }).inputValue(), '');
   assert.equal(requests, 2);
   assert.equal((await page.evaluate(() => window.desktop.providers({ operation: 'readCredential' }))).error.code, 'INVALID_INPUT');
+});
+
+test('D01/D06 desktop DeepSeek defaults, required replacement key, persisted reload and secret clearing', { timeout: 60000 }, async t => {
+  const { page } = await launch(t); await ready(page);
+  await page.getByRole('button', { name: '模型设置', exact: true }).click();
+  await page.getByLabel('显示名称').fill('Cloud UI test');
+  await page.getByLabel('模型 ID', { exact: true }).fill('openai-test-model');
+  await page.getByLabel('API Key', { exact: true }).fill('openai-ui-test-key');
+  await page.getByRole('button', { name: '保存模型', exact: true }).click();
+  await page.getByTestId('provider-feedback').filter({ hasText: '已保存' }).waitFor();
+  await page.getByLabel('API Key', { exact: true }).fill('transient-other-provider-key');
+  await page.getByLabel('协议', { exact: true }).selectOption('deepseek');
+  assert.equal(await page.getByLabel('API Key', { exact: true }).inputValue(), '');
+  assert.equal(await page.getByLabel('端点', { exact: true }).inputValue(), 'https://api.deepseek.com');
+  assert.equal(await page.getByLabel('模型 ID', { exact: true }).inputValue(), 'deepseek-flash');
+  // Check the option itself: Playwright's disabled-state query can retarget to
+  // the enclosing labelled select, which remains enabled for authentication.
+  assert.equal(await page.getByRole('option', { name: '无需认证', exact: true }).evaluate(option => option.disabled), true);
+  await page.getByRole('button', { name: '保存模型', exact: true }).click();
+  await page.getByTestId('provider-feedback').filter({ hasText: '请求格式无效' }).waitFor();
+  const old = await page.evaluate(() => window.desktop.providers({ operation: 'list' }));
+  assert.equal(old.value.profiles[0].providerType, 'openai');
+  await page.getByLabel('API Key', { exact: true }).fill('deepseek-ui-test-key');
+  await page.getByLabel('超时（毫秒）', { exact: true }).fill('60000');
+  await page.getByRole('button', { name: '保存模型', exact: true }).click();
+  await page.getByTestId('provider-feedback').filter({ hasText: '已保存' }).waitFor();
+  assert.equal(await page.getByLabel('API Key', { exact: true }).inputValue(), '');
+  const listed = await page.evaluate(() => window.desktop.providers({ operation: 'list' }));
+  const p = listed.value.profiles[0];
+  assert.equal(p.providerType, 'deepseek'); assert.equal(p.revision, 2);
+  assert.ok((await page.getByTestId('provider-identity').textContent()).includes(p.id));
+  assert.doesNotMatch(JSON.stringify(listed), /secretRef|ui-test-key/);
+  await page.reload(); await ready(page);
+  await page.getByRole('button', { name: '模型设置', exact: true }).click();
+  await page.getByRole('button', { name: 'Cloud UI test · deepseek-flash · v2', exact: true }).click();
+  assert.equal(await page.getByLabel('协议', { exact: true }).inputValue(), 'deepseek');
+  assert.equal(await page.getByLabel('超时（毫秒）', { exact: true }).inputValue(), '60000');
+  assert.equal(await page.getByLabel('API Key', { exact: true }).inputValue(), '');
+  assert.deepEqual(await page.evaluate(() => [localStorage.length, sessionStorage.length]), [0, 0]);
+  // No test button clicked: saving a cloud profile must never send a model request.
+  assert.equal(await page.getByTestId('provider-result').count(), 0);
 });
 
 test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload and single instance', { timeout: 60000 }, async (t) => {

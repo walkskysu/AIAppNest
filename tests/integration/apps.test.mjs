@@ -98,7 +98,8 @@ test('A03 immutable snapshots freeze model behavior; credential rotation preserv
   try { assert.throws(() => raw.prepare('UPDATE revision_snapshots SET configHash=? WHERE revisionId=?').run('0'.repeat(64), first.id), /immutable/);
     assert.throws(() => raw.prepare('UPDATE app_revisions SET roleText=? WHERE id=?').run('tamper', first.id), /immutable/);
   } finally { raw.close(); }
-  await provider(f.providers, p, cfg({ endpoint: 'https://api.deepseek.com/v1' }));
+  // Use a supported endpoint/provider change: DeepSeek /v1 aliases are rejected.
+  await provider(f.providers, p, cfg({ providerType: 'openai', endpoint: 'https://api.openai.com/v1', modelId: 'controlled-model' }));
   assert.throws(() => f.providers.snapshotRuntime(first.snapshot.credentialBinding, first.snapshot.provider), { code: 'CREDENTIAL_UNAVAILABLE' });
   assert.equal(get(f.service, app).state, 'missing-dependencies');
 });

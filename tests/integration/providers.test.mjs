@@ -10,10 +10,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { build } from 'esbuild';
 import { spawnSync } from 'node:child_process';
 import { ServiceManager } from '../../dist/service-manager.cjs';
+import { runLiveGate } from '../../scripts/provider-live-gate.mjs';
 
 const bundle = mkdtempSync(resolve('.test-provider-bundle-'));
 after(() => rmSync(bundle, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 await build({ entryPoints: ['tests/integration/fixtures/provider-entry.ts'], outfile: join(bundle, 'entry.cjs'), bundle: true, platform: 'node', format: 'cjs', target: 'node24' });
+const transportWorker = join(bundle, 'transport.cjs');
+await build({ entryPoints: ['tests/integration/fixtures/provider-transport.ts'], outfile: transportWorker, bundle: true, platform: 'node', format: 'cjs', target: 'node24' });
 const { Storage, ProviderService, CredentialService, CredentialError, buildRuntime, testRuntime, migrate, migrations, providerSaveSchema, providerReplySchema } = createRequire(import.meta.url)(join(bundle, 'entry.cjs'));
 const worker = resolve('dist/provider-probe.cjs');
 const config = (overrides = {}) => ({ name: 'Local model', providerType: 'local-openai', endpoint: 'http://127.0.0.1:11434/v1', modelId: 'test-model', authMode: 'none', settings: { timeoutMs: 3000 }, ...overrides });
@@ -38,7 +41,7 @@ async function server(t, handler) {
   const requests = [];
   const instance = createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
-    requests.push({ url: req.url, authorization: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString()) });
+    requests.push({ url: req.url, originalUrl: req.headers['x-test-original-url'], authorization: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString()) });
     handler(req, res);
   });
   instance.listen(0, '127.0.0.1'); await once(instance, 'listening');
@@ -194,6 +197,35 @@ test('P09 real Windows CurrentUser DPAPI ciphertext roundtrip, restart, corrupti
   assert.deepEqual(readdirSync(join(root, 'credentials')), []);
 });
 
+test('D05 DeepSeek uses product DPAPI and keeps test keys out of DTO, logs, config, database and ciphertext', { skip: process.platform !== 'win32' }, async t => {
+  const childProcess = createRequire(import.meta.url)('node:child_process');
+  const originalSpawn = childProcess.spawnSync;
+  const commandLines = [];
+  childProcess.spawnSync = (file, args, options) => { commandLines.push([file, ...args]); return originalSpawn(file, args, options); };
+  t.after(() => { childProcess.spawnSync = originalSpawn; });
+  const mock = await server(t, success);
+  const { storage, root } = fixture(t);
+  const key = 'non-sensitive-deepseek-DPAPI-marker';
+  const vault = new CredentialService(storage.paths, resolve('dist/credential-host.exe'));
+  const service = new ProviderService(storage, vault, mockProbe(mock));
+  const p = ok(await service.request(save(deepseek(), { action: 'replace', key }))).profile;
+  const restarted = new ProviderService(storage, new CredentialService(storage.paths, resolve('dist/credential-host.exe')), mockProbe(mock));
+  const result = ok(await restarted.request({ operation: 'test', input: identity(p) }));
+  assert.equal(result.result.code, 'SUCCESS');
+  assert.equal(mock.requests[0].authorization, `Bearer ${key}`);
+  assert.doesNotMatch(JSON.stringify([p, result, ok(await restarted.request({ operation: 'list' }))]), /non-sensitive-deepseek-DPAPI-marker|secretRef/);
+  const scan = directory => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) scan(path);
+      else assert.equal(readFileSync(path).includes(Buffer.from(key)), false, path);
+    }
+  };
+  scan(root);
+  assert.ok(commandLines.length >= 2);
+  assert.equal(JSON.stringify(commandLines).includes(key), false);
+});
+
 test('P10 explicit probe executes Pi OpenAI text generation with a fixed request and no local Authorization', async t => {
   const mock = await server(t, success);
   const { service } = fixture(t);
@@ -293,4 +325,155 @@ test('P18 real-model acceptance gate refuses absent explicit local profiles', ()
   assert.equal(report.gate, 'BLOCKED'); assert.equal(report.code, 'MISSING_EXPLICIT_PROFILES');
   assert.equal(report.cloud, null); assert.equal(report.local, null);
   assert.equal(result.stderr, '');
+});
+
+const deepseek = (overrides = {}) => config({ name: 'DeepSeek 官方', providerType: 'deepseek', endpoint: 'https://api.deepseek.com', modelId: 'deepseek-flash', authMode: 'api-key', ...overrides });
+const mockProbe = mock => runtime => testRuntime({ ...runtime, env: { ...runtime.env, PROVIDER_TEST_ORIGIN: new URL(mock.endpoint).origin } }, transportWorker);
+
+test('D01/D06 DeepSeek strict endpoint, persistence, revision and credential rebinding', async t => {
+  for (const endpoint of ['https://api.deepseek.com', 'https://api.deepseek.com/']) {
+    const parsed = providerSaveSchema.parse(save(deepseek({ endpoint }), { action: 'replace', key: 'test-key' }).input);
+    assert.equal(parsed.config.endpoint, 'https://api.deepseek.com');
+  }
+  for (const bad of [
+    { endpoint: 'https://api.deepseek.com/v1' }, { endpoint: 'https://api.deepseek.com/chat/completions' },
+    { endpoint: 'https://api.deepseek.com/v1/chat/completions' }, { endpoint: 'http://api.deepseek.com' },
+    { endpoint: 'https://api.deepseek.com:444' }, { endpoint: 'https://api.deepseek.com.evil.test' },
+    { endpoint: 'https://key@api.deepseek.com' }, { endpoint: 'https://api.deepseek.com?key=secret' },
+    { endpoint: 'https://api.deepseek.com/#secret' }, { endpoint: 'http://127.0.0.1/v1' },
+    { authMode: 'none' }, { thinking: { type: 'enabled' } },
+  ]) assert.equal(providerSaveSchema.safeParse(save(deepseek(bad)).input).success, false);
+  let calls = 0;
+  const { service, credentials, storage, root } = fixture(t, async () => { calls++; return 'SUCCESS'; });
+  const original = ok(await service.request(save(config({ providerType: 'openai', endpoint: 'https://api.openai.com/v1', authMode: 'api-key' }), { action: 'replace', key: 'openai-test-marker' }))).profile;
+  assert.equal((await service.request(save(deepseek(), { action: 'keep' }, original))).error.code, 'INVALID_INPUT');
+  assert.equal(service.runtime(identity(original)).apiKey, 'openai-test-marker');
+  const changed = ok(await service.request(save(deepseek(), { action: 'replace', key: 'deepseek-test-marker' }, original))).profile;
+  assert.equal(changed.revision, 2);
+  assert.equal((await service.request({ operation: 'test', input: identity(original) })).error.code, 'VERSION_CONFLICT');
+  assert.equal(calls, 0);
+  assert.deepEqual([...credentials.values.values()], ['deepseek-test-marker']);
+  storage.close();
+  const reopened = new Storage(root);
+  try {
+    const restarted = new ProviderService(reopened, credentials);
+    assert.equal(restarted.runtime(identity(changed)).model.baseUrl, 'https://api.deepseek.com');
+    assert.equal(restarted.runtime(identity(changed)).model.id, 'deepseek-flash');
+    const dto = ok(await restarted.request({ operation: 'list' }));
+    assert.ok(providerReplySchema.safeParse(dto).success);
+    assert.doesNotMatch(JSON.stringify(dto), /secretRef|test-marker/);
+  } finally { reopened.close(); }
+  for (const filename of readdirSync(join(root, 'data'))) assert.doesNotMatch(readFileSync(join(root, 'data', filename)).toString(), /openai-test-marker|deepseek-test-marker/);
+});
+
+test('D02/D03/D08 official runtime path and parallel providers keep payloads and keys isolated', async t => {
+  const before = { ...process.env };
+  const mock = await server(t, success);
+  const { service } = fixture(t, mockProbe(mock));
+  const profiles = [];
+  for (const cfg of [deepseek(), config({ providerType: 'openai', endpoint: 'https://api.openai.com/v1', authMode: 'api-key' }), config({ endpoint: mock.endpoint, authMode: 'api-key' })]) {
+    profiles.push(ok(await service.request(save(cfg, { action: 'replace', key: `test-${cfg.providerType}-key` }))).profile);
+  }
+  assert.equal(mock.requests.length, 0);
+  const results = await Promise.all(profiles.map(p => service.request({ operation: 'test', input: identity(p) })));
+  assert.deepEqual(results.map(r => ok(r).result.code), ['SUCCESS', 'SUCCESS', 'SUCCESS']);
+  for (const p of profiles) {
+    const req = mock.requests.find(r => r.authorization === `Bearer test-${p.providerType}-key`);
+    assert.equal(req.originalUrl, `${p.endpoint}/chat/completions`);
+    assert.equal(req.url, p.providerType === 'deepseek' ? '/chat/completions' : '/v1/chat/completions');
+    assert.equal(req.body.model, p.modelId); assert.equal(req.body.stream, true);
+    assert.deepEqual(req.body.messages, [{ role: 'user', content: 'Reply with OK.' }]);
+    if (p.providerType === 'deepseek') {
+      assert.deepEqual(req.body, { model: 'deepseek-flash', messages: [{ role: 'user', content: 'Reply with OK.' }], stream: true,
+        stream_options: { include_usage: true }, max_tokens: 128, thinking: { type: 'disabled' } });
+    } else assert.equal(req.body.thinking, undefined);
+  }
+  assert.deepEqual({ ...process.env }, before);
+  assert.doesNotMatch(JSON.stringify(results), /test-.*-key|secretRef|Bearer/);
+});
+
+test('D04/D07 DeepSeek failures, incomplete SSE, redirects and timeout fail closed without retries', async t => {
+  const event = (delta, finish_reason = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+  const end = 'data: [DONE]\n\n';
+  const destination = await server(t, success);
+  const cases = [
+    ...[[401, 'AUTH_FAILED'], [403, 'AUTH_FAILED'], [402, 'QUOTA_EXCEEDED'], [404, 'MODEL_NOT_FOUND'], [429, 'RATE_LIMITED'], [500, 'NETWORK_ERROR'], [503, 'NETWORK_ERROR'], [400, 'PROTOCOL_ERROR']]
+      .map(([status, code]) => [code, (_req, res) => { res.writeHead(status); res.end('deepseek-error-test-key'); }]),
+    ...[
+      ['', 'PROTOCOL_ERROR'],
+      [event({}, 'stop') + end, 'PROTOCOL_ERROR'],
+      [event({ reasoning_content: 'thinking only' }, 'stop') + end, 'PROTOCOL_ERROR'],
+      [event({ content: 'partial' }, 'length') + end, 'INCOMPLETE_RESPONSE'],
+      [event({ content: 'partial' }) + end, 'PROTOCOL_ERROR'],
+      [event({ content: 'OK' }, 'stop'), 'PROTOCOL_ERROR'],
+      [event({ content: 'OK' }, 'stop') + 'data: broken\n\n' + end, 'PROTOCOL_ERROR'],
+      [event({ content: 'OK' }, 'unknown') + end, 'PROTOCOL_ERROR'],
+      [event({ content: 'OK' }, 'stop') + event({}, 'length') + end, 'PROTOCOL_ERROR'],
+      [event({ content: 'OK' }, 'stop') + 'data: {"error":{"message":"deepseek-error-test-key"}}\n\n' + end, 'PROTOCOL_ERROR'],
+      [event({ content: 'x'.repeat(66000) }, 'stop') + end, 'PROTOCOL_ERROR'],
+    ].map(([body, code]) => [code, (_req, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.end(body); }]),
+    ['NETWORK_ERROR', (_req, res) => { res.writeHead(307, { location: `${destination.endpoint}/chat/completions` }); res.end(); }],
+    ['TIMEOUT', (_req, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': waiting\n\n'); }],
+  ];
+  for (const [code, handler] of cases) {
+    const mock = await server(t, handler);
+    const { service } = fixture(t, mockProbe(mock));
+    const p = ok(await service.request(save(deepseek({ settings: { timeoutMs: code === 'TIMEOUT' ? 1000 : 3000 } }), { action: 'replace', key: 'deepseek-error-test-key' }))).profile;
+    const start = Date.now();
+    const result = ok(await service.request({ operation: 'test', input: identity(p) }));
+    assert.equal(result.result.code, code);
+    assert.equal(mock.requests.length, 1);
+    assert.ok(Date.now() - start < 4000);
+    assert.doesNotMatch(JSON.stringify(result), /deepseek-error-test-key|stack|Bearer/);
+  }
+  assert.equal(destination.requests.length, 0);
+});
+
+test('D03 fragmented UTF-8 SSE, CRLF, keepalive and usage-only trailer complete normally', async t => {
+  const mock = await server(t, async (_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    const bytes = Buffer.from(': keepalive\r\n\r\ndata: {"choices":[{"index":0,"delta":{"content":"你好"},"finish_reason":null}]}\r\n\r\n' +
+      'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\r\n\r\n' +
+      'data: {"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}\r\n\r\ndata: [DONE]\r\n\r\n');
+    for (const byte of bytes) { res.write(Buffer.from([byte])); await new Promise(resolve => setImmediate(resolve)); }
+    res.end();
+  });
+  const { service } = fixture(t, mockProbe(mock));
+  const p = ok(await service.request(save(deepseek(), { action: 'replace', key: 'test-fragment-key' }))).profile;
+  assert.equal(ok(await service.request({ operation: 'test', input: identity(p) })).result.code, 'SUCCESS');
+});
+
+test('D09 live gate accepts DeepSeek, requires both profiles and exact revisions, never claims partial PASS', async t => {
+  const mock = await server(t, success);
+  const { service, credentials, storage } = fixture(t, mockProbe(mock));
+  let cloud = ok(await service.request(save(deepseek(), { action: 'replace', key: 'live-gate-test-key' }))).profile;
+  const local = ok(await service.request(save(config({ endpoint: mock.endpoint })))).profile;
+  const report = await runLiveGate(service, cloud, local);
+  assert.equal(report.gate, 'PASS'); // Mock-only gate logic, not live acceptance evidence.
+  assert.equal(report.cloud.providerType, 'deepseek'); assert.equal(report.local.providerType, 'local-openai');
+  assert.equal(report.cloud.mode, 'non-thinking-text-sse');
+  assert.ok(report.cloud.testedAt); assert.ok(report.cloud.durationMs >= 0);
+  assert.doesNotMatch(JSON.stringify(report), /secretRef|live-gate-test-key|https:|Bearer/);
+  const count = mock.requests.length;
+  await assert.rejects(runLiveGate(service, cloud, cloud));
+  const stale = await runLiveGate(service, cloud, { ...local, revision: local.revision + 1 });
+  assert.equal(stale.gate, 'BLOCKED'); assert.equal(stale.local.code, 'VERSION_CONFLICT');
+  credentials.values.clear();
+  const missing = await runLiveGate(service, cloud, local);
+  assert.equal(missing.gate, 'BLOCKED'); assert.equal(missing.cloud.code, 'CREDENTIAL_UNAVAILABLE');
+  assert.equal(missing.cloud.providerType, 'deepseek'); assert.equal(missing.local.code, 'NOT_TESTED');
+  assert.equal(mock.requests.length, count);
+  cloud = ok(await service.request(save(deepseek(), { action: 'replace', key: 'live-gate-test-key' }, cloud))).profile;
+  const failing = await server(t, (_req, res) => { res.writeHead(503); res.end(); });
+  const brokenLocal = ok(await service.request(save(config({ endpoint: failing.endpoint })))).profile;
+  // Route each provider independently: cloud mock succeeds, local mock fails.
+  const mixedService = new ProviderService(storage, credentials, runtime => runtime.providerType === 'deepseek' ? mockProbe(mock)(runtime) : testRuntime(runtime, worker));
+  const partial = await runLiveGate(mixedService, cloud, brokenLocal);
+  assert.equal(partial.cloud.code, 'SUCCESS'); assert.equal(partial.local.code, 'NETWORK_ERROR');
+  assert.equal(partial.gate, 'BLOCKED');
+  for (const args of [[], [`--data-root=${storage.paths.root}`, `--cloud=${cloud.id}`], [`--data-root=${storage.paths.root}`, '--cloud=invalid', `--local=${local.id}`]]) {
+    const result = spawnSync(process.execPath, ['scripts/provider-live.mjs', ...args], { encoding: 'utf8', windowsHide: true });
+    assert.equal(result.status, 2); assert.equal(JSON.parse(result.stdout).code, 'MISSING_EXPLICIT_PROFILES');
+    assert.equal(result.stderr, '');
+  }
 });

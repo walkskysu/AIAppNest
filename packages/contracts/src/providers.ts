@@ -16,14 +16,15 @@ export const providerConfigSchema = z.strictObject(providerFields).superRefine((
     return;
   }
   const url = new URL(value.endpoint);
-  const clean = !url.username && !url.password && !url.search && !url.hash
-    && (value.providerType === 'deepseek' ? /^\/(v1\/?)?$/.test(url.pathname) : /^\/v1\/?$/.test(url.pathname));
+  const clean = !url.username && !url.password && !url.search && !url.hash &&
+    (value.providerType === 'deepseek' ? url.pathname === '/' : /^\/v1\/?$/.test(url.pathname));
   const supported = value.providerType === 'openai'
     ? url.origin === 'https://api.openai.com' && value.authMode === 'api-key'
-    : value.providerType === 'deepseek' ? url.origin === 'https://api.deepseek.com' && value.authMode === 'api-key'
+    : value.providerType === 'deepseek'
+      ? url.origin === 'https://api.deepseek.com' && value.authMode === 'api-key'
       : ['127.0.0.1', '[::1]'].includes(url.hostname) && ['http:', 'https:'].includes(url.protocol);
   if (!clean || !supported) ctx.addIssue({ code: 'custom', message: 'Unsupported endpoint or authentication' });
-});
+}).transform(value => ({ ...value, endpoint: value.providerType === 'deepseek' ? 'https://api.deepseek.com' : value.endpoint }));
 export const providerSaveSchema = z.strictObject({
   id: z.uuid().optional(), expectedRevision: z.number().int().positive().optional(),
   config: providerConfigSchema,
@@ -40,7 +41,7 @@ export const providerViewSchema = z.strictObject({
   id: z.uuid(), revision: z.number().int().positive(), hasCredential: z.boolean(),
   createdAt: z.number().int().nonnegative(), updatedAt: z.number().int().nonnegative(),
 });
-export const probeCodeSchema = z.enum(['SUCCESS', 'AUTH_FAILED', 'MODEL_NOT_FOUND', 'RATE_LIMITED', 'NETWORK_ERROR', 'PROTOCOL_ERROR', 'TIMEOUT', 'CREDENTIAL_UNAVAILABLE']);
+export const probeCodeSchema = z.enum(['SUCCESS', 'AUTH_FAILED', 'QUOTA_EXCEEDED', 'MODEL_NOT_FOUND', 'RATE_LIMITED', 'NETWORK_ERROR', 'PROTOCOL_ERROR', 'INCOMPLETE_RESPONSE', 'TIMEOUT', 'CREDENTIAL_UNAVAILABLE']);
 export const providerTestSchema = z.strictObject({
   ...providerIdentitySchema.shape, code: probeCodeSchema,
   testedAt: z.number().int().nonnegative(), durationMs: z.number().int().nonnegative(), stale: z.boolean(),
