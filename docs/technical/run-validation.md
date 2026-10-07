@@ -1,5 +1,7 @@
 # RunScheduler：设计与 R01–R12 验证
 
+2026-10-08 / #14：创建向导和 Chat 正式 IPC 已复用 RunScheduler；新增 retryOf 归属检查、试运行禁用正式记忆注入、删除会话前封闭提交并回收活动/空闲 Worker、独立持久化工具结果。真实模型 E01/E05/E06/E09 仍因 `MISSING_EXPLICIT_TEST_APP` 待验收；夹具通过不代替真实通过。见 [Chat 验收](chat-validation.md) 与 [脱敏记录](evidence/chat-windows-validation.json)。
+
 2026-10-07，Issue #13，基于 main 已合并的 PiAdapter。维护者已授权在真实模型验收前开发及提交草稿 PR。本记录不将确定性模型夹具计为真实模型验收，也不作为关闭 Issue 的依据。
 
 ## 调度和持久化

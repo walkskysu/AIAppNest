@@ -9,3 +9,5 @@ export { JsonlDecoder } from '../../../packages/pi-adapter/src/jsonl';
 export { validateSessionPath, compileSession } from '../../../packages/pi-adapter/src/config';
 
 export { RunScheduler } from '../../../apps/service-host/src/runs';
+export { ChatService } from '../../../apps/service-host/src/chat';
+export { RunFeed, safeExternal, shouldSubmit } from '../../../apps/desktop/renderer/src/chat-state';

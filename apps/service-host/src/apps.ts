@@ -128,7 +128,10 @@ export class AppService {
     const root = this.storage.paths.revision(id<'app'>(appId),id<'revision'>(revisionId));
     return { discovery:false, extensions:[], paths:(revision.snapshot.skills ?? []).map(s => join(root,s.path,'SKILL.md')) };
   }
-  private publish(app: App): void {
+  createCandidate(appId: string, expectedVersion: number): AppRevisionView {
+    return this.storage.transaction(() => this.publish(this.current(appId, expectedVersion), false));
+  }
+  private publish(app: App, activate = true): AppRevisionView {
     if (app.status === 'archived') throw new DomainError('INVALID_TRANSITION');
     const config = this.storage.appDraft(app.id).config;
     if (this.issues(config).length) throw new DomainError('INVALID_INPUT');
@@ -153,11 +156,11 @@ export class AppService {
       write('role.md', roleText); write('manifest.json', manifest);
       this.storage.paths.publishDirectory(staging, directory); this.fault('renamed');
       this.storage.publishRevision({ id: revisionId, appId: app.id, revision: this.storage.nextRevision(app.id), providerProfileId: profile.id,
-        config, roleText, runtimeVersion, createdAt: timestamp() }, config.skills.map(s => ({ revisionId,skillId:id<'skill'>(s.id),skillVersion:s.version,enabled:s.enabled })), app.version);
+        config, roleText, runtimeVersion, createdAt: timestamp() }, config.skills.map(s => ({ revisionId,skillId:id<'skill'>(s.id),skillVersion:s.version,enabled:s.enabled })), app.version, activate);
       this.storage.saveSnapshot(app.id, revisionId, hash(manifest), manifest);
       this.fault('transaction');
       // Re-read the complete files before the outer transaction can commit currentRevisionId.
-      this.readRevision(app.id, revisionId);
+      return this.readRevision(app.id, revisionId);
     } catch (error) {
       // DB rollback is handled by request's outer transaction. Cleanup failure is retryable at startup.
       for (const path of [staging, directory]) try { this.removeManagedTree(path); } catch { /* startup collection */ }

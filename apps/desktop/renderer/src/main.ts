@@ -51,7 +51,7 @@ createApp(defineComponent({
         ]),
         h('p', { class: 'diagnostic', 'data-testid': 'diagnostic', role: 'status' }, diagnostic.value),
       ]),
-      h('section', { class: 'boundary' }, [h('h2', '当前可用'), h('p', '应用管理 · 配置版本 · 技能库 · 模型配置 · 凭据保护 · 手动连接测试'), h('h2', '后续接入'), h('p', '试运行、聊天与 Pi 会话执行尚未实现。'), h('p', '关闭窗口将停止服务；服务异常后不会自动重放请求。')]),
+      h('section', { class: 'boundary' }, [h('h2', '当前可用'), h('p', '创建向导 · 隔离试运行 · 应用内对话 · 技能库 · 模型设置 · 权限确认'), h('h2', '后续接入'), h('p', '附件上传、产物预览、记忆管理和完整回收站尚未接入。'), h('p', '关闭窗口将停止服务；服务异常后不会自动重放请求。')]),
     ]);
   },
 })).mount('#app');

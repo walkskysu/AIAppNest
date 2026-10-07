@@ -11,7 +11,7 @@ export type PolicyGrant = z.infer<typeof grantSchema>;
 export const approvalSchema = z.strictObject({ id: uuid, ...policyScopeSchema.shape, runId: uuid,
   callId: z.string().min(1).max(200), tool: z.string().min(1).max(80), digest: z.string().regex(/^[a-f0-9]{64}$/),
   grantId: uuid.nullable(), grantVersion: z.number().int().positive().nullable(),
-  resource: z.string().max(100), createdAt: time, expiresAt: time,
+  resource: z.string().max(100), target: z.string().max(8192).optional(), impact: z.string().max(200).optional(), createdAt: time, expiresAt: time,
   state: z.enum(['pending', 'allowed', 'denied', 'expired', 'cancelled', 'consumed']) });
 export type PolicyApproval = z.infer<typeof approvalSchema>;
 export const grantSelectionSchema = z.strictObject({ token: uuid, expiresAt: time, scope: z.literal('policy-directory') }).nullable();

@@ -9,7 +9,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 const args = Object.fromEntries(process.argv.slice(2).map(value => { const split = value.indexOf('='); return [value.slice(2, split), value.slice(split + 1)]; }));
 const report = { checkedAt: new Date().toISOString(), node: process.versions.node, pi: '0.73.1', gate: 'BLOCKED', code: 'MISSING_EXPLICIT_TEST_APP',
-  streaming: false, restoredMessages: false, recall: false, cancellation: null };
+  streaming: false, isolated: false, restoredMessages: false, recall: false, cancellation: null };
 let directory, storage, policy, worker, activeRun;
 try {
   if (Object.keys(args).some(key => !['data-root','app'].includes(key)) || !isAbsolute(args['data-root'] ?? '')
@@ -24,7 +24,7 @@ try {
     const apps = new AppService(storage, providers), app = storage.apps.get({ id: args.app });
     const revision = apps.readRevision(app.id, app.currentRevisionId);
     if (revision.snapshot.config.permissions.mode !== 'chat') throw Error('TEST_REQUIRES_CHAT_APP');
-    const conversation = storage.createConversation(app.id, randomUUID(), 'Engine explicit live acceptance');
+    let conversation = storage.createConversation(app.id, randomUUID(), 'Engine explicit live acceptance A');
     policy = new PolicyService(storage, (a, r) => apps.readRevision(a, r));
     const services = { storage, apps, providers, policy }, runtime = readEngineRuntime(resolve('dist'));
     const options = { onEvent(event) { if (event.type === 'assistant.delta') report.streaming = true; } };
@@ -51,6 +51,23 @@ try {
     const second = await worker.prompt(run(), 'Return only the exact marker I asked you to remember.'); finish(second);
     const messages = await worker.getMessages();
     report.recall = second.status === 'succeeded' && JSON.stringify(messages.at(-1)).includes(marker);
+    // E05 uses a second real session with a different secret marker, then restores A exactly.
+    const firstConversation = conversation;
+    await worker.close();
+    conversation = storage.createConversation(app.id, randomUUID(), 'Engine explicit live acceptance B');
+    worker = await PiAdapter.start(services, runtime, app.id, conversation.id, options);
+    const otherMarker = `isolation-${randomUUID()}`;
+    const isolated = await worker.prompt(run(), `Remember this exact marker for this conversation: ${otherMarker}. Reply briefly.`); finish(isolated);
+    const otherMessages = await worker.getMessages(), otherFile = (await worker.getState()).sessionFile;
+    await worker.close();
+    conversation = firstConversation;
+    worker = await PiAdapter.restore(services, runtime, app.id, conversation.id, options);
+    const isolationRecall = await worker.prompt(run(), 'Return only the exact marker I asked you to remember in this conversation.'); finish(isolationRecall);
+    const originalMessages = await worker.getMessages();
+    report.isolated = isolated.status === 'succeeded' && isolationRecall.status === 'succeeded'
+      && file !== otherFile && file === (await worker.getState()).sessionFile
+      && !JSON.stringify(otherMessages).includes(marker) && !JSON.stringify(originalMessages).includes(otherMarker)
+      && JSON.stringify(originalMessages.at(-1)).includes(marker);
     // Cancel on the first streamed delta of a long response; a too-fast completed response is not a passing cancellation.
     let cancelling, requested = false;
     const original = options.onEvent;
@@ -60,7 +77,7 @@ try {
     };
     const third = await worker.prompt(run(), 'Write a detailed numbered list of 500 distinct short sentences.'); finish(third);
     if (cancelling) report.cancellation = await cancelling;
-    if (report.streaming && report.restoredMessages && report.recall && third.status === 'cancelled'
+    if (report.streaming && report.isolated && report.restoredMessages && report.recall && third.status === 'cancelled'
       && report.cancellation?.requested && (report.cancellation.idle || report.cancellation.exited)) { report.gate = 'PASS'; report.code = 'SUCCESS'; }
     else { report.code = 'LIVE_ACCEPTANCE_INCOMPLETE'; process.exitCode = 2; }
   }

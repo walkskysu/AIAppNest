@@ -9,7 +9,7 @@ export const runViewSchema = z.strictObject({ id: uuid, ...scope, requestId: uui
 export const runEventSchema = z.strictObject({ runId: uuid, seq: z.number().int().positive(), type: z.string(), payload: z.unknown(), createdAt: time });
 export const runRequestSchema = z.discriminatedUnion('operation', [
   z.strictObject({ operation: z.literal('submit'), ...scope, revisionId: uuid, requestId: uuid,
-    text: z.string().min(1).max(1024 * 1024), attachmentIds: z.array(uuid).max(32) }),
+    text: z.string().min(1).max(1024 * 1024), attachmentIds: z.array(uuid).max(32), retryOf: uuid.optional() }),
   ...(['get','cancel'] as const).map(operation => z.strictObject({ operation: z.literal(operation), ...scope, runId: uuid })),
   z.strictObject({ operation: z.literal('subscribe'), ...scope, runId: uuid, afterSeq: time }),
   z.strictObject({ operation: z.literal('next'), subscriptionId: uuid, afterSeq: time }),
