@@ -192,6 +192,20 @@ CREATE TABLE policy_records (
  PRIMARY KEY(kind,id), FOREIGN KEY(conversationId,appId) REFERENCES conversations(id,appId)
 ) STRICT;
 CREATE INDEX policy_records_scope ON policy_records(appId,conversationId,kind);
+` }, { version: 6, name: 'accepted-handled-run', sql: `
+DROP TRIGGER run_transition;
+CREATE TRIGGER run_transition BEFORE UPDATE ON runs BEGIN
+ SELECT CASE WHEN NEW.version!=OLD.version+1 THEN RAISE(ABORT, 'version conflict') END;
+ -- Accepted extension commands can finish without agent work.
+ SELECT CASE WHEN NOT (
+   (OLD.state='queued' AND NEW.state IN ('starting','cancelled')) OR
+   (OLD.state='starting' AND NEW.state IN ('running','failed','cancelling','interrupted','handled')) OR
+   (OLD.state='running' AND NEW.state IN ('handled','waiting_approval','cancelling','succeeded','failed','interrupted')) OR
+   (OLD.state='waiting_approval' AND NEW.state IN ('running','cancelling','failed','interrupted')) OR
+   (OLD.state='cancelling' AND NEW.state IN ('cancelled','interrupted'))
+ ) THEN RAISE(ABORT, 'invalid transition') END;
+ SELECT CASE WHEN OLD.startedAt IS NOT NULL AND NEW.startedAt IS NOT OLD.startedAt THEN RAISE(ABORT, 'immutable') END;
+END;
 ` }];
 
 export function migrate(db: DatabaseSync, steps: readonly Migration[] = migrations): void {

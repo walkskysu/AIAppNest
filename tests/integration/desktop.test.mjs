@@ -231,7 +231,7 @@ test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload 
   const initial = await page.evaluate(() => window.desktop.getStatus());
   const pid = initial.value.pid;
   const surface = await page.evaluate(() => ({ keys: Object.keys(window.desktop).sort(), require: typeof window.require, process: typeof window.process, ipc: typeof window.ipcRenderer }));
-  assert.deepEqual(surface, { keys: ['apps', 'getStatus', 'onStatusChanged', 'ping', 'policy', 'providers', 'retryService', 'selectGrantDirectory', 'selectSkillDirectory', 'selectTrustedAutomation', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
+  assert.deepEqual(surface, { keys: ['apps', 'getStatus', 'onStatusChanged', 'ping', 'policy', 'providers', 'retryService', 'runs', 'selectGrantDirectory', 'selectSkillDirectory', 'selectTrustedAutomation', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
   const prefs = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences());
   for (const key of ['sandbox', 'contextIsolation', 'webSecurity']) assert.equal(prefs[key], true);
   for (const key of ['nodeIntegration', 'nodeIntegrationInWorker', 'nodeIntegrationInSubFrames', 'webviewTag', 'allowRunningInsecureContent']) assert.equal(prefs[key], false, key);

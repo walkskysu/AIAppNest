@@ -43,6 +43,7 @@ const digest = (value: unknown) => createHash('sha256').update(canonicalJson(val
 export class PolicyService extends EventEmitter {
   private selections = new Map<string, Scope & { owner: string; root: string; expiresAt: number }>();
   private runs = new Map<string, RunPolicy>();
+  private reserved = new Map<string, RunBoundary>();
   private waiting = new Map<string, { finish: () => void; timer: NodeJS.Timeout }>();
   private closed = false;
   private readonly now: () => number;
@@ -165,6 +166,11 @@ export class PolicyService extends EventEmitter {
   }
   /** Scheduler/test host only: resolve run -> conversation -> fixed revision. */
   bindRun(appId: string, runId: string): RunBoundary {
+    const reserved = this.reserved.get(runId);
+    if (reserved) {
+      if (this.runs.get(runId)?.appId !== appId) deny('OWNERSHIP_MISMATCH');
+      reserved.assertActive(); this.reserved.delete(runId); return reserved;
+    }
     if (this.closed || this.runs.has(runId)) deny('RUN_ALREADY_BOUND');
     const record = this.storage.runs.get({ appId: id<'app'>(appId), id: id<'run'>(runId) });
     const scope = { appId, conversationId: record.conversationId }, snapshot = this.permissions(scope), trust = this.trust(scope);
@@ -286,6 +292,9 @@ export class PolicyService extends EventEmitter {
     run.cancelled = true;
     for (const item of this.approvals(run)) if (item.runId === runId && ['pending', 'allowed'].includes(item.state)) this.setApproval(item, 'cancelled');
   }
+  /** Freeze grant/trust authority before Worker startup; the adapter claims this exact boundary. */
+  reserve(appId: string, runId: string): void { this.reserved.set(runId, this.bindRun(appId, runId)); }
+  release(runId: string): void { this.cancel(runId); this.reserved.delete(runId); this.runs.delete(runId); }
   close(): void {
     if (this.closed) return;
     for (const runId of this.runs.keys()) this.cancel(runId);
