@@ -254,6 +254,32 @@ export class Storage {
     });
   }
   /** Dedupe scope is the trusted conversation + requestId; no second execution is created. */
+  findRun(appId: AppId, conversationId: ConversationId, requestId: Run['requestId']): Run | undefined {
+    this.conversations.get({ appId, id: conversationId });
+    const row = this.db.prepare('SELECT id FROM runs WHERE conversationId=? AND requestId=?').get(conversationId, requestId);
+    return row ? this.runs.get({ appId, id: row.id as RunId }) : undefined;
+  }
+  unfinishedRuns(): Run[] {
+    return this.db.prepare("SELECT id,appId FROM runs WHERE endedAt IS NULL").all()
+      .map(row => this.runs.get({ appId: row.appId as AppId, id: row.id as RunId }));
+  }
+  eventsAfter(appId: AppId, runId: RunId, afterSeq: number, limit = 128): RunEvent[] {
+    this.runs.get({ appId, id: runId });
+    if (!Number.isSafeInteger(afterSeq) || afterSeq < 0 || !Number.isInteger(limit) || limit < 1 || limit > 128) throw new DomainError('INVALID_INPUT');
+    const rows = this.db.prepare('SELECT * FROM run_events WHERE runId=? AND seq>? ORDER BY seq LIMIT ?').all(runId, afterSeq, limit);
+    let bytes = 0;
+    const result: RunEvent[] = [];
+    for (const row of rows) {
+      const size = Buffer.byteLength(row.payload as string);
+      if (result.length && bytes + size > 256 * 1024) break;
+      // Old or non-engine producers may have larger events. Keep cursor progress explicit.
+      const oversized = size > 256 * 1024;
+      result.push({ ...row, type: oversized ? 'output.truncated' : row.type,
+        payload: oversized ? { source: row.type, originalBytes: size } : JSON.parse(row.payload as string) } as unknown as RunEvent);
+      bytes += oversized ? 256 : size;
+    }
+    return result;
+  }
   createRun(run: Run): Run {
     return this.transaction(() => {
       if (!schemas.runs.safeParse(run).success) throw new DomainError('INVALID_INPUT');

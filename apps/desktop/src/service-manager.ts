@@ -1,3 +1,4 @@
+import { runRequestSchema, type RunRequest, type RunReply } from '@aiappnest/contracts';
 import { fork, type ChildProcess, type ForkOptions } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -8,7 +9,7 @@ import { appRequestSchema, type AppReply, type AppRequest } from '@aiappnest/con
 import { skillHostRequestSchema, type SkillHostReply, type SkillHostRequest } from '@aiappnest/contracts';
 import { policyHostRequestSchema, type PolicyHostReply, type PolicyHostRequest } from '@aiappnest/contracts';
 
-type Pending = { kind: 'response' | 'providers-response' | 'apps-response' | 'skills-response' | 'policy-response'; operation?: ProviderRequest['operation'] | AppRequest['operation'] | SkillHostRequest['operation'] | PolicyHostRequest['operation']; resolve: (result: Result<PingOutput | ProviderReply | AppReply | SkillHostReply | PolicyHostReply>) => void; timer: NodeJS.Timeout };
+type Pending = { kind: 'response' | 'providers-response' | 'apps-response' | 'skills-response' | 'policy-response' | 'runs-response'; operation?: ProviderRequest['operation'] | AppRequest['operation'] | SkillHostRequest['operation'] | PolicyHostRequest['operation'] | RunRequest['operation']; resolve: (result: Result<PingOutput | ProviderReply | AppReply | SkillHostReply | PolicyHostReply | RunReply>) => void; timer: NodeJS.Timeout };
 export function serviceEnvironment(dataRoot?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'LANG', 'LOCALAPPDATA']) {
@@ -86,7 +87,7 @@ export class ServiceManager extends EventEmitter {
           if (this.status.phase !== 'starting' || message.nonce !== this.nonce || message.pid !== child.pid || message.nodeVersion !== SERVICE_NODE_VERSION) { this.fail('PROTOCOL_ERROR'); return; }
           this.transition('ready');
           this.settleStart({ ok: true, value: this.snapshot() });
-        } else if (message.kind === 'response' || message.kind === 'providers-response' || message.kind === 'apps-response' || message.kind === 'skills-response' || message.kind === 'policy-response') {
+        } else if (message.kind === 'response' || message.kind === 'providers-response' || message.kind === 'apps-response' || message.kind === 'skills-response' || message.kind === 'policy-response' || message.kind === 'runs-response') {
           const pending = this.pending.get(message.id);
           if (this.status.phase !== 'ready' || !pending || pending.kind !== message.kind) { this.fail('PROTOCOL_ERROR'); return; }
           if (message.kind !== 'response' && message.result.ok && pending.operation !== message.result.value.operation) { this.fail('PROTOCOL_ERROR'); return; }
@@ -128,6 +129,18 @@ export class ServiceManager extends EventEmitter {
       this.send({ kind: 'providers', id, input: parsed.data });
     });
   }
+  runs(input: unknown): Promise<Result<RunReply>> {
+    const parsed = runRequestSchema.safeParse(input);
+    if (!parsed.success) return Promise.resolve({ ok: false, error: publicError('INVALID_INPUT') });
+    if (this.status.phase !== 'ready') return Promise.resolve({ ok: false, error: publicError(this.closing ? 'SHUTTING_DOWN' : 'NOT_READY') });
+    if (this.pending.size >= 64) return Promise.resolve({ ok: false, error: publicError('BUSY') });
+    return new Promise(resolve => {
+      const id = randomUUID();
+      const timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
+      this.pending.set(id, { kind: 'runs-response', operation: parsed.data.operation, resolve: result => resolve(result as Result<RunReply>), timer });
+      this.send({ kind: 'runs', id, input: parsed.data });
+    });
+  }
   apps(input: unknown): Promise<Result<AppReply>> {
     const parsed = appRequestSchema.safeParse(input);
     if (!parsed.success) return Promise.resolve({ ok: false, error: publicError('INVALID_INPUT') });
@@ -160,7 +173,7 @@ export class ServiceManager extends EventEmitter {
     const child = this.child;
     this.stopping = new Promise<void>((resolve) => {
       if (!child) { resolve(); return; }
-      const timer = setTimeout(() => child.kill(), this.options.shutdownMs ?? 1500);
+      const timer = setTimeout(() => child.kill(), this.options.shutdownMs ?? 15000);
       child.once('close', () => { clearTimeout(timer); resolve(); });
       this.send({ kind: 'shutdown' });
     }).then(() => { this.transition('stopped'); });

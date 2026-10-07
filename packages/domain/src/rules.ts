@@ -1,5 +1,5 @@
 import type { Id, MessageStatus, RunState, Timestamp } from './models';
-export type DomainErrorCode = 'NOT_FOUND' | 'OWNERSHIP_MISMATCH' | 'VERSION_CONFLICT' | 'DUPLICATE_RECORD' | 'INVALID_TRANSITION' | 'INVALID_INPUT' | 'STORAGE_UNAVAILABLE' | 'SKILL_INTEGRITY' | 'SKILL_IN_USE' | 'FORBIDDEN';
+export type DomainErrorCode = 'BUSY' | 'SHUTTING_DOWN' | 'NOT_READY' | 'NOT_FOUND' | 'OWNERSHIP_MISMATCH' | 'VERSION_CONFLICT' | 'DUPLICATE_RECORD' | 'INVALID_TRANSITION' | 'INVALID_INPUT' | 'STORAGE_UNAVAILABLE' | 'SKILL_INTEGRITY' | 'SKILL_IN_USE' | 'FORBIDDEN';
 export class DomainError extends Error {
   constructor(public readonly code: DomainErrorCode, message: string = code, options?: ErrorOptions) { super(message, options); this.name = 'DomainError'; }
 }
@@ -16,7 +16,7 @@ export function requireSameApp(expected: Id<'app'>, actual: Id<'app'>): void {
 }
 export const runTransitions: Readonly<Record<RunState, readonly RunState[]>> = {
   queued: ['starting', 'cancelled'], starting: ['running', 'failed', 'cancelling', 'interrupted', 'handled'],
-  running: ['waiting_approval', 'cancelling', 'succeeded', 'failed', 'interrupted'],
+  running: ['handled', 'waiting_approval', 'cancelling', 'succeeded', 'failed', 'interrupted'],
   waiting_approval: ['running', 'cancelling', 'failed', 'interrupted'], cancelling: ['cancelled', 'interrupted'],
   succeeded: [], failed: [], cancelled: [], interrupted: [], handled: [],
 };

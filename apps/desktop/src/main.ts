@@ -61,6 +61,7 @@ if (!app.requestSingleInstanceLock()) {
     handle(channels.retry, (raw) => emptySchema.safeParse(raw).success ? service!.start() : { ok: false, error: publicError('INVALID_INPUT') });
     handle(channels.ping, (raw) => service!.ping(raw));
     handle(channels.providers, (raw) => service!.providers(raw));
+    handle(channels.runs, (raw) => service!.runs(raw));
     handle(channels.apps, (raw) => service!.apps(raw));
     // Identity belongs to this Main document generation; the renderer cannot supply it.
     let skillOwner = randomUUID(), choosingSkill = false;

@@ -1,0 +1,145 @@
+{
+  "checkedAt": "2026-10-07T11:55:03.829Z",
+  "environment": {
+    "os": "Windows x64 10.0.26300",
+    "node": "24.19.0",
+    "pi": "0.73.1",
+    "database": "SQLite FULL/WAL"
+  },
+  "model": "Explicit local deterministic HTTP SSE fixture; not real-provider acceptance",
+  "scheduler": {
+    "command": "node --test --test-concurrency=1 tests/integration/runs.test.mjs",
+    "tests": 21,
+    "passed": 21,
+    "failed": 0,
+    "skipped": 0,
+    "results": [
+      {
+        "test": "R01/R03 concurrent duplicate submissions have one message and serial prompts; payload conflicts reject",
+        "status": "PASS"
+      },
+      {
+        "test": "R02 model caps nest within global cap; older eligible model requests do not starve",
+        "status": "PASS"
+      },
+      {
+        "test": "R04 overlapping parent/child write roots serialize with FIFO reservation; siblings proceed",
+        "status": "PASS"
+      },
+      {
+        "test": "R05 queued and starting cancellation, repeat cancel, bounded queue and timeout release capacity",
+        "status": "PASS"
+      },
+      {
+        "test": "R06/R07 cancellation receipt precedes termination; late natural success cannot win",
+        "status": "PASS"
+      },
+      {
+        "test": "R09 durable cursor subscriptions page history and live output with no gaps; unsubscribe and slow clients bounded",
+        "status": "PASS"
+      },
+      {
+        "test": "R10 idle TTL never reaps active workers; R11 launch failures and worker errors release queue",
+        "status": "PASS"
+      },
+      {
+        "test": "R12 shutdown cancels queue/active, seals admission and restart never replays old runs",
+        "status": "PASS"
+      },
+      {
+        "test": "submission validates scope, pinned revision, bytes, attachment ownership, configuration before persistence",
+        "status": "PASS"
+      },
+      {
+        "test": "R04 canonical grant roots refresh while queued and newly granted writes cannot evade locks",
+        "status": "PASS"
+      },
+      {
+        "test": "R02 production local model default quota is one while global quota remains two",
+        "status": "PASS"
+      },
+      {
+        "test": "attachments use owned registered text and integrity checks, never renderer paths",
+        "status": "PASS"
+      },
+      {
+        "test": "R09 final assistant and terminal event roll back together on storage failure; never report saved success",
+        "status": "PASS"
+      },
+      {
+        "test": "R01/R03/R10 actual Pi queue, handled result, TTL exact restoration and authoritative final message",
+        "status": "PASS"
+      },
+      {
+        "test": "R05 actual Windows Pi startup cancellation never sends a prompt and subsequent queue continues",
+        "status": "PASS"
+      },
+      {
+        "test": "R11 an actual idle Worker crash is evicted before the next queued prompt restores its session",
+        "status": "PASS"
+      },
+      {
+        "test": "R06 actual Pi abort timeout retires Job and releases quota for next queued run",
+        "status": "PASS"
+      },
+      {
+        "test": "R08 actual approval deny/timeout/revoke/host disconnect never writes and releases quota",
+        "status": "PASS"
+      },
+      {
+        "test": "R08 approval resumes only its exact call; subscription disconnect never approves another call",
+        "status": "PASS"
+      },
+      {
+        "test": "R06/R12 real Windows Job descendants exit on scheduler cancellation and shutdown; unrelated process survives",
+        "status": "PASS"
+      },
+      {
+        "test": "R03/R09/R12 production IPC submit/get/subscribe/next/unsubscribe/cancel and host shutdown persist states",
+        "status": "PASS"
+      }
+    ]
+  },
+  "related": {
+    "engineTests": 20,
+    "enginePassed": 20,
+    "storageTests": 18,
+    "storagePassed": 18
+  },
+  "performance": {
+    "unit": "ms",
+    "sampleKind": "single development-machine sample, not P95",
+    "directSubmit": 3.1,
+    "ipcTwoDuplicateSubmits": 96,
+    "ipcCancelReceipt": 3.4
+  },
+  "nativeProcesses": {
+    "actualWindowsJobHelper": true,
+    "descendantsVerifiedExited": true,
+    "unrelatedProcessVerifiedAlive": true,
+    "actualPiAbortTimeout": true,
+    "actualPiStartupCancel": true,
+    "actualServiceHostShutdown": true
+  },
+  "localFullRegression": {
+    "command": "npm.cmd test",
+    "tests": 165,
+    "passed": 154,
+    "failed": 10,
+    "skipped": 1,
+    "note": "Before addition of idle-crash test. Eight Electron sandbox installation ACL failures; two CurrentUser DPAPI failures; existing Spike DPAPI prerequisite skip. No test weakened or skipped by this change. Mandatory host publication checks are authoritative."
+  },
+  "realProvider": {
+    "command": "npm.cmd run engine:live",
+    "checkedAt": "2026-10-07T11:44:22.801Z",
+    "gate": "BLOCKED",
+    "code": "MISSING_EXPLICIT_TEST_APP",
+    "callsMade": false,
+    "pending": [
+      "E01",
+      "E05",
+      "E06",
+      "E09"
+    ]
+  }
+}

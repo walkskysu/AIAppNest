@@ -7,6 +7,9 @@ import { ProviderService } from './providers';
 import { AppService } from './apps';
 import { SkillRegistry } from './skills';
 import { PolicyService } from '../../../packages/policy/src/index';
+import { readEngineRuntime } from '../../../packages/pi-adapter/src/index';
+import { RunScheduler } from './runs';
+import { readRunSettings } from './run-settings';
 
 // Only the owning Main process can access this inherited IPC pipe. No network listener.
 if (!process.send || process.versions.node !== SERVICE_NODE_VERSION) process.exit(1);
@@ -16,14 +19,21 @@ let providers: ProviderService | undefined;
 let apps: AppService | undefined;
 let skills: SkillRegistry | undefined;
 let policy: PolicyService | undefined;
+let runs: RunScheduler | undefined;
+let closing: Promise<void> | undefined;
 const close = () => { policy?.close(); policy = undefined; storage?.close(); storage = undefined; };
+const shutdown = () => closing ??= (async () => {
+  ready = false;
+  try { await runs?.close(); } catch { process.exitCode = 1; }
+  finally { close(); if (process.connected) process.disconnect(); }
+})();
 const handshakeDeadline = setTimeout(() => process.exit(1), 5000);
 const send = (message: HostOutput) => {
   if (process.connected) process.send!(message, undefined, undefined, (error) => { if (error) process.exit(1); });
 };
-process.on('disconnect', () => { close(); process.exit(process.exitCode ?? 0); });
+process.on('disconnect', () => { void shutdown().finally(() => process.exit(process.exitCode ?? 0)); });
 process.on('exit', close);
-for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { close(); process.exit(0); });
+for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { void shutdown().finally(() => process.exit(0)); });
 process.on('message', (raw: unknown) => {
   const parsed = hostInputSchema.safeParse(raw);
   if (!parsed.success) {
@@ -33,7 +43,7 @@ process.on('message', (raw: unknown) => {
     return;
   }
   const message = parsed.data;
-  if (message.kind === 'shutdown') { clearTimeout(handshakeDeadline); close(); process.disconnect(); return; }
+  if (message.kind === 'shutdown') { clearTimeout(handshakeDeadline); void shutdown(); return; }
   if (message.kind === 'hello' && !ready) {
     clearTimeout(handshakeDeadline);
     try {
@@ -42,6 +52,7 @@ process.on('message', (raw: unknown) => {
       skills = new SkillRegistry(storage);
       apps = new AppService(storage, providers, undefined, skills);
       policy = new PolicyService(storage, (appId, revisionId) => apps!.readRevision(appId, revisionId));
+      runs = new RunScheduler({ storage, apps, providers, policy }, readEngineRuntime(__dirname), readRunSettings(storage));
     }
     catch {
       send({ kind: 'fatal', error: publicError('STORAGE_UNAVAILABLE') });
@@ -61,6 +72,8 @@ process.on('message', (raw: unknown) => {
     send({ kind: 'skills-response', id: message.id, result: skills!.request(message.input) });
   } else if (message.kind === 'policy' && ready) {
     send({ kind: 'policy-response', id: message.id, result: policy!.request(message.input) });
+  } else if (message.kind === 'runs' && ready) {
+    send({ kind: 'runs-response', id: message.id, result: runs!.request(message.input) });
   } else {
     send({ kind: 'fatal', error: publicError('PROTOCOL_ERROR') });
     process.disconnect();

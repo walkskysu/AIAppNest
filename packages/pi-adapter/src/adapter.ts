@@ -16,6 +16,8 @@ interface Active {
   usage: { inputTokens: number; outputTokens: number }; cancellation: CancellationEvidence;
 }
 export interface AdapterOptions {
+  /** Interrupt launch only. Active cancellation uses abort() and its evidence. */
+  signal?: AbortSignal;
   startupMs?: number; commandMs?: number; closeMs?: number;
   bufferBytes?: number; bufferEvents?: number;
   /** Called synchronously; must not block. Throwing subscribers are isolated. No raw protocol logging. */
@@ -71,7 +73,12 @@ export class PiAdapter {
     try {
       const config = compileSession(services, runtime, appId, conversationId, restore);
       adapter = new PiAdapter(services, runtime, config, options);
-      await adapter.launch();
+      const abort = () => { void adapter!.close(true).catch(() => {}); };
+      if (options.signal?.aborted) throw new EngineError('INVALID_STATE');
+      options.signal?.addEventListener('abort', abort, { once: true });
+      try { await adapter.launch(); }
+      finally { options.signal?.removeEventListener('abort', abort); }
+      if (options.signal?.aborted) throw new EngineError('INVALID_STATE');
       return adapter;
     } catch (error) {
       if (adapter) await adapter.close(true);
@@ -81,6 +88,7 @@ export class PiAdapter {
   }
   private async launch(): Promise<void> {
     await this.bridge.listen();
+    if (this.closing || this.options.signal?.aborted) throw new EngineError('INVALID_STATE');
     const env = { ...this.config.env, AIAPPNEST_POLICY_PIPE: this.bridge.path, AIAPPNEST_POLICY_TOKEN: this.bridge.token };
     this.child = spawn(this.runtime.nativeHost, ['job', String(process.pid), this.runtime.node, ...this.config.args], {
       cwd: this.config.cwd, env, shell: false, windowsHide: true, stdio: ['pipe','pipe','pipe'],

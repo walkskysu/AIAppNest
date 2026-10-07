@@ -7,3 +7,5 @@ export { PolicyService } from '../../../packages/policy/src/index';
 export { PiAdapter, readEngineRuntime, EngineError } from '../../../packages/pi-adapter/src/index';
 export { JsonlDecoder } from '../../../packages/pi-adapter/src/jsonl';
 export { validateSessionPath, compileSession } from '../../../packages/pi-adapter/src/config';
+
+export { RunScheduler } from '../../../apps/service-host/src/runs';

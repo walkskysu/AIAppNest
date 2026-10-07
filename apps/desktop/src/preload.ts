@@ -1,3 +1,4 @@
+import { runRequestSchema, runReplySchema } from '@aiappnest/contracts';
 import { contextBridge, ipcRenderer } from 'electron';
 import { channels, pingInputSchema, pingOutputSchema, publicError, resultSchema, statusSchema, type DesktopAPI, type ServiceStatus } from '@aiappnest/contracts';
 import { providerRequestSchema, providerReplySchema } from '@aiappnest/contracts';
@@ -42,6 +43,13 @@ const api: DesktopAPI = {
     if (!parsed.success) return { ok:false,error:publicError('INVALID_INPUT') };
     const reply = resultSchema(skillReplySchema).safeParse(await ipcRenderer.invoke(channels.skills,parsed.data));
     return reply.success && (!reply.data.ok || reply.data.value.operation === parsed.data.operation) ? reply.data : { ok:false,error:publicError('PROTOCOL_ERROR') };
+  },
+  runs: async input => {
+    const parsed = runRequestSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, error: publicError('INVALID_INPUT') };
+    const raw = await ipcRenderer.invoke(channels.runs, parsed.data);
+    const reply = resultSchema(runReplySchema).safeParse(raw);
+    return reply.success ? reply.data : { ok: false, error: publicError('PROTOCOL_ERROR') };
   },
   apps: async input => {
     const parsed = appRequestSchema.safeParse(input);

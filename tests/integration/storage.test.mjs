@@ -279,7 +279,9 @@ test('S17 actual Service Host initializes before ready, closes/restarts, preserv
   const first = start(root); assert.equal((await first.start()).ok,true); assert.ok(existsSync(join(root,'data','platform.db'))); await first.stop();
   const storage = new Storage(root); const a = seed(storage); storage.transitionRun(a.app.id,a.run.id,1,'starting',now); storage.close();
   const second = start(root); assert.equal((await second.start()).ok,true); await second.stop();
-  const reopened = new Storage(root); assert.equal(reopened.apps.get({ id: a.app.id }).name,a.app.name); assert.equal(reopened.runs.get({ id: a.run.id, appId: a.app.id }).state,'starting'); reopened.close();
+  const reopened = new Storage(root); assert.equal(reopened.apps.get({ id: a.app.id }).name,a.app.name);
+  const recovered = reopened.runs.get({ id: a.run.id, appId: a.app.id });
+  assert.equal(recovered.state,'interrupted'); assert.equal(recovered.error,'RECOVERY_REQUIRED'); reopened.close();
   const bad = join(root,'bad'); mkdirSync(join(bad,'data'),{ recursive: true }); const path = join(bad,'data','platform.db'); writeFileSync(path,'corrupt');
   const failed = start(bad); const result = await failed.start(); assert.equal(result.ok,false); assert.equal(result.error.code,'STORAGE_UNAVAILABLE');
   assert.doesNotMatch(result.error.message,/platform\.db|\\|corrupt/); assert.equal(readFileSync(path,'utf8'),'corrupt');
