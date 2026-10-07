@@ -34,6 +34,8 @@ npm.cmd test        # 类型检查、生产构建、真实进程测试及已有 
 
 ## 本地持久化
 
+正式 PiAdapter 已提供固定运行时启动、平台权限扩展、JSONL 平台事件、有界输出、取消证据和按真实 sessionFile 的精确恢复，供后续 RunScheduler 使用；聊天 UI 尚未接入。内部接口及重试责任见 [Engine 架构](docs/technical/engine-architecture.md)，真实 Windows Pi 测试与尚待完成的真实模型验收见 [E01–E11 验证记录](docs/technical/engine-validation.md)。
+
 权限服务现已实现仅对话、受控文件处理与需明确选择的可信自动化模式。授权绑定固定会话版本，区分读写，外部目录只接受系统选择令牌；工具在实际入口检查路径、撤销和一次性确认。Pi 权限适配由最小测试宿主验证，正式聊天/Worker 队列尚未接入。详见 [Policy 边界与集成契约](docs/technical/policy-architecture.md) 和 [Q01–Q10 验证](docs/technical/policy-validation.md)。
 
 “技能库”通过系统文件夹选择导入 Skill，展示静态校验、脚本清单、依赖检测和权限声明；导入不会执行或安装脚本。应用草稿可选择明确版本、启用/禁用及自动/显式调用，发布后固定 ID、版本和 SHA-256。源包升级不改变旧版本；源包或快照篡改阻止解析，历史引用阻止删除。示例目录为 `tests/fixtures/skills/reference-helper`，详见 [Skill 规则与检测边界](docs/technical/skill-architecture.md)及 [K01–K10 验证记录](docs/technical/skill-validation.md)。

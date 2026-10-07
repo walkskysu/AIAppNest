@@ -21,7 +21,8 @@
     "spike:live": "node spikes/pi-windows/src/live.mjs",
     "spike:native": "node spikes/pi-windows/src/native-probe.mjs",
     "spike:environment": "node spikes/pi-windows/src/environment.mjs",
-    "provider:live": "node scripts/provider-live.mjs"
+    "provider:live": "node scripts/provider-live.mjs",
+    "engine:live": "node scripts/engine-live.mjs"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "0.73.1",

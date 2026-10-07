@@ -1,0 +1,7 @@
+{"type":"response","id":"command-2","command":"get_messages","success":true,"data":{"messages":[]}}
+{"type":"agent_start"}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"中文 🌏"}}
+{"type":"response","id":"command-1","command":"prompt","success":true}
+{"type":"tool_execution_start","toolCallId":"call-1","toolName":"platform_write","args":{"grantId":"00000000-0000-4000-8000-000000000001","path":"report.txt","content":"fixture"}}
+{"type":"tool_execution_end","toolCallId":"call-1","toolName":"platform_write","result":{"content":[{"type":"text","text":"POLICY_DENIED"}]},"isError":true}
+{"type":"agent_end","messages":[]}
