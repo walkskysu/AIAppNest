@@ -6,6 +6,8 @@ import { appRequestSchema, appReplySchema, type AppRequest, type AppReply } from
 export * from './apps';
 import { skillHostRequestSchema, skillHostReplySchema, type SkillRequest, type SkillReply, type SkillSelection } from './skills';
 export * from './skills';
+import { policyHostRequestSchema, policyHostReplySchema, type PolicyRequest, type PolicyReply, type GrantSelection } from './policy';
+export * from './policy';
 
 export const errorCodeSchema = z.enum([
   'INVALID_INPUT', 'FORBIDDEN', 'NOT_READY', 'START_FAILED', 'START_TIMEOUT',
@@ -49,7 +51,7 @@ export const resultSchema = <T extends z.ZodType>(value: T) => z.discriminatedUn
   z.strictObject({ ok: z.literal(true), value }),
   z.strictObject({ ok: z.literal(false), error: errorSchema }),
 ]);
-export const channels = Object.freeze({ status: 'foundation:status', retry: 'foundation:retry', ping: 'foundation:ping', changed: 'foundation:changed', providers: 'providers:request', apps: 'apps:request', skills: 'skills:request', selectSkill: 'skills:select' });
+export const channels = Object.freeze({ status: 'foundation:status', retry: 'foundation:retry', ping: 'foundation:ping', changed: 'foundation:changed', providers: 'providers:request', apps: 'apps:request', skills: 'skills:request', selectSkill: 'skills:select', policy: 'policy:request', selectGrant: 'policy:select', trust: 'policy:trust' });
 const id = z.uuid();
 export const hostInputSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('hello'), version: z.literal(SERVICE_PROTOCOL_VERSION), nonce: id }),
@@ -57,6 +59,7 @@ export const hostInputSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('providers'), id, input: providerRequestSchema }),
   z.strictObject({ kind: z.literal('apps'), id, input: appRequestSchema }),
   z.strictObject({ kind: z.literal('skills'), id, input: skillHostRequestSchema }),
+  z.strictObject({ kind: z.literal('policy'), id, input: policyHostRequestSchema }),
   z.strictObject({ kind: z.literal('shutdown') }),
 ]);
 export const hostOutputSchema = z.discriminatedUnion('kind', [
@@ -65,11 +68,15 @@ export const hostOutputSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('providers-response'), id, result: resultSchema(providerReplySchema) }),
   z.strictObject({ kind: z.literal('apps-response'), id, result: resultSchema(appReplySchema) }),
   z.strictObject({ kind: z.literal('skills-response'), id, result: resultSchema(skillHostReplySchema) }),
+  z.strictObject({ kind: z.literal('policy-response'), id, result: resultSchema(policyHostReplySchema) }),
   z.strictObject({ kind: z.literal('fatal'), error: errorSchema }),
 ]);
 export type HostInput = z.infer<typeof hostInputSchema>;
 export type HostOutput = z.infer<typeof hostOutputSchema>;
 export interface DesktopAPI {
+  selectGrantDirectory(scope: { appId: string; conversationId: string }): Promise<Result<GrantSelection>>;
+  selectTrustedAutomation(scope: { appId: string; conversationId: string }): Promise<Result<boolean>>;
+  policy(input: PolicyRequest): Promise<Result<PolicyReply>>;
   selectSkillDirectory(): Promise<Result<SkillSelection>>;
   skills(input: SkillRequest): Promise<Result<SkillReply>>;
   apps(input: AppRequest): Promise<Result<AppReply>>;

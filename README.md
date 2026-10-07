@@ -34,6 +34,8 @@ npm.cmd test        # 类型检查、生产构建、真实进程测试及已有 
 
 ## 本地持久化
 
+权限服务现已实现仅对话、受控文件处理与需明确选择的可信自动化模式。授权绑定固定会话版本，区分读写，外部目录只接受系统选择令牌；工具在实际入口检查路径、撤销和一次性确认。Pi 权限适配由最小测试宿主验证，正式聊天/Worker 队列尚未接入。详见 [Policy 边界与集成契约](docs/technical/policy-architecture.md) 和 [Q01–Q10 验证](docs/technical/policy-validation.md)。
+
 “技能库”通过系统文件夹选择导入 Skill，展示静态校验、脚本清单、依赖检测和权限声明；导入不会执行或安装脚本。应用草稿可选择明确版本、启用/禁用及自动/显式调用，发布后固定 ID、版本和 SHA-256。源包升级不改变旧版本；源包或快照篡改阻止解析，历史引用阻止删除。示例目录为 `tests/fixtures/skills/reference-helper`，详见 [Skill 规则与检测边界](docs/technical/skill-architecture.md)及 [K01–K10 验证记录](docs/technical/skill-validation.md)。
 
 首页无需编辑 JSON 即可创建、搜索、收藏、编辑、复制和归档应用。基础编辑使用草稿乐观锁，发布生成不可变快照；旧会话不随新版本升级。复制清空模型关联和外部目录授权，需重新配置。打开只进入应用空间，不启动 Worker。“可使用（配置就绪）”不代表通过模型连接或端到端试运行。详见[版本与补偿规则](docs/technical/app-architecture.md)和[A01–A10 验证记录](docs/technical/app-validation.md)。

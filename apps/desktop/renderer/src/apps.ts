@@ -1,5 +1,5 @@
 import { defineComponent, h, onMounted, reactive, ref, watch } from 'vue';
-import { newAppConfig, type AppView, type AppIssue, type AppRequest, type AppReply, type ProviderView, type SkillView } from '@aiappnest/contracts';
+import { newAppConfig, trustedBoundaryNotice, type AppView, type AppIssue, type AppRequest, type AppReply, type ProviderView, type SkillView } from '@aiappnest/contracts';
 
 const states = { usable: '可使用（配置就绪）', incomplete: '配置未完成', 'missing-dependencies': '缺少依赖', archived: '已归档' };
 const reasons: Record<AppIssue, string> = { MODEL_REQUIRED: '请重新选择并确认模型关联', PROVIDER_MISSING: '模型配置不存在',
@@ -118,7 +118,8 @@ export const ApplicationHome = defineComponent({
             ...(['read','write','shell'] as const).map(tool => check({ read: '读取文件', write: '写入文件', shell: '运行命令' }[tool], draft.value.permissions.tools.includes(tool), enabled => {
               draft.value.permissions.tools = enabled ? [...draft.value.permissions.tools, tool] : draft.value.permissions.tools.filter(t => t !== tool);
             })),
-            h('p', '外部目录授权需后续文件工具接入；复制不会继承授权。'),
+            draft.value.permissions.mode === 'trusted-automation' ? h('p', { role: 'note', 'data-testid': 'trusted-boundary' }, trustedBoundaryNotice) : null,
+            h('p', '发布版本固定权限上限。外部目录需系统选择授权；会话运行仍需独立授权，复制不会继承授权。'),
             check('启用应用记忆', draft.value.memory.enabled, v => { draft.value.memory.enabled = v; }),
             check('自动提取候选（仍需审核）', draft.value.memory.automaticCandidates, v => { draft.value.memory.automaticCandidates = v; }),
             h('div', { class: 'form-grid' }, [number('记忆条数', draft.value.memory.maxItems, v => { draft.value.memory.maxItems = v; }, 0, 100),

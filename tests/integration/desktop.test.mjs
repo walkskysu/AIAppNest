@@ -231,7 +231,7 @@ test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload 
   const initial = await page.evaluate(() => window.desktop.getStatus());
   const pid = initial.value.pid;
   const surface = await page.evaluate(() => ({ keys: Object.keys(window.desktop).sort(), require: typeof window.require, process: typeof window.process, ipc: typeof window.ipcRenderer }));
-  assert.deepEqual(surface, { keys: ['apps', 'getStatus', 'onStatusChanged', 'ping', 'providers', 'retryService', 'selectSkillDirectory', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
+  assert.deepEqual(surface, { keys: ['apps', 'getStatus', 'onStatusChanged', 'ping', 'policy', 'providers', 'retryService', 'selectGrantDirectory', 'selectSkillDirectory', 'selectTrustedAutomation', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
   const prefs = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences());
   for (const key of ['sandbox', 'contextIsolation', 'webSecurity']) assert.equal(prefs[key], true);
   for (const key of ['nodeIntegration', 'nodeIntegrationInWorker', 'nodeIntegrationInSubFrames', 'webviewTag', 'allowRunningInsecureContent']) assert.equal(prefs[key], false, key);
@@ -241,13 +241,16 @@ test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload 
     return contents.isDevToolsOpened();
   }), false);
   assert.equal((await page.evaluate(() => window.desktop.ping({ text: 'x', exec: 'bad' }))).error.code, 'INVALID_INPUT');
+  assert.equal((await page.evaluate(() => window.desktop.policy({ operation: 'execute', tool: 'bash', args: {} }))).error.code, 'INVALID_INPUT');
+  assert.equal((await page.evaluate(() => window.desktop.selectGrantDirectory({ path: 'C:\\Windows' }))).error.code, 'INVALID_INPUT');
+  assert.equal((await page.evaluate(() => window.desktop.selectTrustedAutomation({ approved: true }))).error.code, 'INVALID_INPUT');
   assert.equal(await page.evaluate(async () => { try { await fetch('file:///C:/Windows/win.ini'); return true; } catch { return false; } }), false);
   assert.equal(await page.evaluate(async () => { try { await fetch('https://example.com'); return true; } catch { return false; } }), false);
   await page.evaluate(() => window.open('https://example.com'));
   assert.equal(app.windows().length, 1);
   // A second real renderer with a test-only probe cannot impersonate the owning window.
   const probe = join(profile, 'probe.cjs');
-  await writeFile(probe, "const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('probe',()=>ipcRenderer.invoke('foundation:status',{}));");
+  await writeFile(probe, "const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('probe',(channel='foundation:status')=>ipcRenderer.invoke(channel,{}));");
   const foreignPagePromise = app.waitForEvent('window');
   await app.evaluate(async ({ BrowserWindow }, preload) => {
     const other = new BrowserWindow({ show: false, webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false } });
@@ -255,6 +258,7 @@ test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload 
   }, probe);
   const foreignPage = await foreignPagePromise;
   assert.equal((await foreignPage.evaluate(() => window.probe())).error.code, 'FORBIDDEN');
+  for (const channel of ['policy:request', 'policy:select', 'policy:trust']) assert.equal((await foreignPage.evaluate(channel => window.probe(channel), channel)).error.code, 'FORBIDDEN');
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => !w.isVisible()).destroy());
   for (let i = 0; i < 3; i++) { await page.reload(); await ready(page); assert.equal((await page.evaluate(() => window.desktop.getStatus())).value.pid, pid); }
   const second = spawn(electronPath, [resolve('dist'), `--user-data-dir=${profile}`], { env: environment(), stdio: 'ignore', windowsHide: true });
