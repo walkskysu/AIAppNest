@@ -46,6 +46,20 @@ export class RunScheduler {
   private closing?: Promise<void>;
   private timer: NodeJS.Timeout;
   private pumping = false;
+  private retiring = new Set<string>();
+  /** Seal new submissions before cancellation. Idle workers also exit before soft deletion. */
+  retireConversation(appId: string, conversationId: string): boolean {
+    this.storage.conversations.get({ appId: id<'app'>(appId), id: id<'conversation'>(conversationId) });
+    this.retiring.add(conversationId);
+    for (const job of [...this.queue, ...this.active.values()]) if (job.run.conversationId === conversationId) this.cancel(this.getRun(appId,conversationId,job.run.id));
+    if ([...this.active.values()].some(job => job.run.conversationId === conversationId)) return false;
+    const entry = this.workers.get(conversationId);
+    if (entry) {
+      entry.retiring ??= entry.worker.close(true).then(() => { this.workers.delete(conversationId); }, () => this.storageFailure());
+      return false;
+    }
+    return true;
+  }
   constructor(private readonly services: EngineServices & { policy: PolicyService }, private readonly runtime: EngineRuntime,
     private readonly options: SchedulerOptions = {}) {
     for (const value of [options.concurrency ?? 2, options.localConcurrency ?? 1, options.queueLimit ?? 100,
@@ -122,7 +136,7 @@ export class RunScheduler {
       if (data.length !== artifact.size || createHash('sha256').update(data).digest('hex') !== artifact.hash) throw new DomainError('INVALID_INPUT');
       text += `\n<attachment id="${attachmentId}">\n${new TextDecoder('utf-8', { fatal: true }).decode(data)}\n</attachment>`;
     }
-    const memory = this.options.memory?.(input) ?? '';
+    const memory = this.storage.trialForConversation(id<'app'>(input.appId),id<'conversation'>(input.conversationId)) ? '' : this.options.memory?.(input) ?? '';
     if (memory) text += `\n${memory}`;
     if (Buffer.byteLength(text) > 1024 * 1024) throw new DomainError('INVALID_INPUT');
     return { model: hash([snapshot.provider.endpoint, snapshot.provider.modelId]), local: snapshot.provider.providerType === 'local-openai',
@@ -135,7 +149,7 @@ export class RunScheduler {
   private submit(input: Submit): RunReply {
     const appId = id<'app'>(input.appId), conversationId = id<'conversation'>(input.conversationId);
     const conversation = this.storage.conversations.get({ appId, id: conversationId });
-    const fingerprint = hash({ revisionId: input.revisionId, text: input.text, attachmentIds: input.attachmentIds });
+    const fingerprint = hash({ revisionId: input.revisionId, text: input.text, attachmentIds: input.attachmentIds, ...(input.retryOf ? { retryOf: input.retryOf } : {}) });
     const existing = this.storage.findRun(appId, conversationId, id<'request'>(input.requestId));
     if (existing) {
       const first = this.storage.eventsAfter(appId, existing.id, 0, 1)[0];
@@ -143,9 +157,15 @@ export class RunScheduler {
       return { operation: 'submit', run: existing, duplicate: true };
     }
     if (this.stopped) throw new DomainError('SHUTTING_DOWN');
+    if (this.retiring.has(conversationId)) throw new DomainError('INVALID_INPUT');
     if (this.failed) throw new DomainError('STORAGE_UNAVAILABLE');
     if (conversation.revisionId !== input.revisionId) throw new DomainError('VERSION_CONFLICT');
-    if (conversation.status !== 'active' || this.storage.apps.get({ id: appId }).status !== 'ready') throw new DomainError('INVALID_INPUT');
+    const app = this.storage.apps.get({ id: appId });
+    if (conversation.status !== 'active' || app.status === 'archived' || (app.status !== 'ready' && !this.storage.trialForConversation(appId,conversationId))) throw new DomainError('INVALID_INPUT');
+    if (input.retryOf) {
+      const previous = this.getRun(appId,conversationId,input.retryOf);
+      if (!terminal(previous)) throw new DomainError('INVALID_INPUT');
+    }
     if (!input.text.trim() || Buffer.byteLength(input.text) > 1024 * 1024
       || (/^\s*\//.test(input.text) && !/^\/skill:[\w-]+(?:\s|$)/.test(input.text) && input.text !== '/aiappnest-handled')) throw new DomainError('INVALID_INPUT');
     if (this.queue.length >= (this.options.queueLimit ?? 100)) throw new DomainError('BUSY');
@@ -155,7 +175,7 @@ export class RunScheduler {
         state: 'queued', phase: 'created', version: 1, createdAt: timestamp(), startedAt: null, endedAt: null, error: null, usage: null });
       this.storage.messages.insert({ id: id<'message'>(randomUUID()), appId, conversationId, runId: run.id,
         role: 'user', content: input.text, status: 'complete', createdAt: timestamp() });
-      this.storage.appendEvent(appId, run.id, 'run.queued', { fingerprint, ...plan.snapshot });
+      this.storage.appendEvent(appId, run.id, 'run.queued', { fingerprint, retryOf: input.retryOf ?? null, ...plan.snapshot });
       return run;
     });
     this.queue.push({ run, input, plan, controller: new AbortController() });
@@ -309,7 +329,14 @@ export class RunScheduler {
   };
   private flush() {
     if (!this.pending.length) return;
-    this.storage.transaction(() => { for (const item of this.pending) this.storage.appendEvent(item.run.appId, item.run.id, item.type, item.payload); });
+    this.storage.transaction(() => { for (const item of this.pending) {
+      this.storage.appendEvent(item.run.appId, item.run.id, item.type, item.payload);
+      if (item.type === 'engine.tool.result') {
+        const payload = item.payload as { name?: string; result?: unknown; isError?: boolean };
+        this.storage.messages.insert({ id: id<'message'>(randomUUID()), appId:item.run.appId,conversationId:item.run.conversationId,
+          runId:item.run.id,role:'tool',content:`${payload.name ?? '工具'}\n${JSON.stringify(payload.result)}`,status:payload.isError ? 'failed' : 'complete',createdAt:timestamp() });
+      }
+    } });
     this.pending = []; this.pendingBytes = 0;
   }
   private finish(run: Run, state: RunState, error: string | null = null, content = '', result?: EngineResult) {

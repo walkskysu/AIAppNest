@@ -1,0 +1,20 @@
+{
+  "checkedAt": "2026-10-08",
+  "issue": 14,
+  "runtime": { "node": "24.19.0", "pi": "0.73.1", "platform": "win32" },
+  "fixture": {
+    "model": "deterministic local HTTP SSE",
+    "realComponents": ["ServiceManager IPC", "Service Host", "SQLite", "Pi CLI", "Windows Worker", "session JSONL"],
+    "chatIntegration": { "passed": 5, "failed": 0 },
+    "desktop": "Production Electron wizard/chat hard test passed in host checks; restricted-shell launch remains blocked",
+    "firstHostCheck": { "total": 172, "passed": 171, "failed": 1, "skipped": 0, "failure": "Existing exact preload allowlist missing new chat/openExternal; assertion updated" }
+  },
+  "live": {
+    "command": "npm.cmd run engine:live",
+    "gate": "BLOCKED",
+    "code": "MISSING_EXPLICIT_TEST_APP",
+    "pending": ["E01", "E05", "E06", "E09", "C01 real model UI flow"],
+    "manualChecks": "C01-C10 remain required before final acceptance"
+  },
+  "handoff": { "draftRequired": true, "reference": "Refs #14", "closeIssue": false }
+}

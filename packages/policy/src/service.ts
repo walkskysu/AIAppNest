@@ -226,7 +226,10 @@ export class PolicyService extends EventEmitter {
     this.active(run); if (signal?.aborted) deny('RUN_CANCELLED');
     const item: PolicyApproval = { id: randomUUID(), appId: run.appId, conversationId: run.conversationId, runId: run.runId,
       callId: call.callId, tool: call.tool, digest: call.digest, grantId: call.grantId, grantVersion: call.grantVersion,
-      resource: call.resource, state: 'pending', createdAt: this.now(), expiresAt: this.now() + (this.options.approvalMs ?? 120000) };
+      resource: call.resource,
+      target: call.grantId ? `${run.grants.find(g => g.id === call.grantId)?.root ?? ''} / ${String((call.args as { path?: string })?.path ?? '')}` : call.resource,
+      impact: ['platform_write','platform_output','write','edit'].includes(call.tool) ? '写入或覆盖目标内容；已执行的写入不会随停止自动回滚。' : '读取目标内容，结果可能发送给所选模型。',
+      state: 'pending', createdAt: this.now(), expiresAt: this.now() + (this.options.approvalMs ?? 120000) };
     let finish!: () => void;
     const promise = new Promise<void>(resolve => { finish = resolve; });
     const timer = setTimeout(() => {

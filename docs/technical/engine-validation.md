@@ -1,5 +1,7 @@
 # Engine E01–E11 验证记录
 
+2026-10-08 / #14：`engine:live` 新增 E05 双会话独立标记及恢复后交叉污染检查，PASS 同时要求 streaming、isolated、restoredMessages、recall 和流式取消。当前执行仍返回 `MISSING_EXPLICIT_TEST_APP`，E01/E05/E06/E09 **均未取得真实模型 PASS**。本次授权仅允许 #14 开发/测试/草稿 PR；见 [Chat 验收](chat-validation.md) 和 [脱敏门禁记录](evidence/chat-windows-validation.json)。
+
 2026-10-07，Windows x64 10.0.26300、Node 24.19.0、Pi 0.73.1。前置 #11 closed/completed，PR #25 已合入当前基线。
 
 `npm.cmd run typecheck` 通过，生产构建通过。最终 `node --test --test-concurrency=1 --test-reporter=tap tests/integration/engine.test.mjs`：**20/20 通过，无跳过**。之前引擎 18 项与权限 19 项联合运行 **37/37 通过**；后续新增两项实际 CLI 扩展故障/坏 stdout 测试及增强的 Skill 隔离检查已包含最终 20 项。

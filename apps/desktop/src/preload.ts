@@ -1,3 +1,4 @@
+import { chatRequestSchema, chatReplySchema } from '@aiappnest/contracts';
 import { runRequestSchema, runReplySchema } from '@aiappnest/contracts';
 import { contextBridge, ipcRenderer } from 'electron';
 import { channels, pingInputSchema, pingOutputSchema, publicError, resultSchema, statusSchema, type DesktopAPI, type ServiceStatus } from '@aiappnest/contracts';
@@ -16,6 +17,16 @@ const listener = (_event: unknown, raw: unknown) => {
 ipcRenderer.on(channels.changed, listener);
 window.addEventListener('unload', () => { callbacks.clear(); ipcRenderer.removeListener(channels.changed, listener); });
 const api: DesktopAPI = {
+  chat: async input => {
+    const parsed = chatRequestSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, error: publicError('INVALID_INPUT') };
+    const reply = resultSchema(chatReplySchema).safeParse(await ipcRenderer.invoke(channels.chat,parsed.data));
+    return reply.success ? reply.data : { ok: false, error: publicError('PROTOCOL_ERROR') };
+  },
+  openExternal: async url => {
+    const reply = resultSchema(z.boolean()).safeParse(await ipcRenderer.invoke(channels.external,url));
+    return reply.success ? reply.data : { ok: false, error: publicError('PROTOCOL_ERROR') };
+  },
   selectGrantDirectory: async scope => {
     const input = policyScopeSchema.safeParse(scope);
     if (!input.success) return { ok: false, error: publicError('INVALID_INPUT') };

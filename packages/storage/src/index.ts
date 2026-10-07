@@ -164,6 +164,51 @@ export class Storage {
     });
   }
 
+  chatList(appId: AppId, query: string, limit: number, offset: number) {
+    this.apps.get({ id: appId });
+    const where = `c.appId=? AND c.status='active' AND NOT EXISTS(SELECT 1 FROM chat_trials t WHERE t.conversationId=c.id)
+      AND (instr(lower(c.title),lower(?))>0 OR EXISTS(SELECT 1 FROM messages m WHERE m.appId=c.appId AND m.conversationId=c.id AND instr(lower(m.content),lower(?))>0))`;
+    const values = [appId, query, query];
+    const total = this.db.prepare(`SELECT count(*) n FROM conversations c WHERE ${where}`).get(...values)!.n as number;
+    const rows = this.db.prepare(`SELECT c.id FROM conversations c WHERE ${where} ORDER BY c.createdAt DESC,c.id LIMIT ? OFFSET ?`).all(...values, limit, offset);
+    return { total, conversations: rows.map(row => this.conversations.get({ appId, id: row.id as ConversationId })) };
+  }
+  chatHistory(appId: AppId, conversationId: ConversationId, limit: number, offset: number) {
+    const conversation = this.conversations.get({ appId, id: conversationId });
+    const total = this.db.prepare('SELECT count(*) n FROM messages WHERE appId=? AND conversationId=?').get(appId,conversationId)!.n as number;
+    return { conversation, total, messages: this.messages.list({ appId, conversationId }, { limit, offset }),
+      runs: this.db.prepare('SELECT id FROM runs WHERE appId=? AND conversationId=? ORDER BY createdAt,id').all(appId,conversationId)
+        .map(row => this.runs.get({ appId, id: row.id as RunId })) };
+  }
+  renameConversation(appId: AppId, conversationId: ConversationId, title: string) {
+    this.conversations.get({ appId, id: conversationId });
+    this.db.prepare('UPDATE conversations SET title=?,updatedAt=? WHERE appId=? AND id=?').run(title,timestamp(),appId,conversationId);
+    return this.conversations.get({ appId, id: conversationId });
+  }
+  recycleConversation(appId: AppId, conversationId: ConversationId) {
+    this.transaction(() => {
+      this.archiveConversation(appId,conversationId);
+      this.db.prepare('INSERT OR IGNORE INTO conversation_recycle VALUES(?,?,?,?)').run(conversationId,appId,'chat-and-attachments;preserve-memory;preserve-artifacts',timestamp());
+    });
+  }
+  trialRows(appId: AppId) {
+    return this.db.prepare('SELECT * FROM chat_trials WHERE appId=? ORDER BY rowid DESC LIMIT 100').all(appId) as unknown as
+      { id: string; appId: AppId; conversationId: ConversationId; revisionId: AppRevision['id']; draftHash: string; text: string; published: number }[];
+  }
+  trialForConversation(appId: AppId, conversationId: ConversationId): boolean {
+    return !!this.db.prepare('SELECT 1 FROM chat_trials WHERE appId=? AND conversationId=?').get(appId,conversationId);
+  }
+  saveTrial(row: { id: string; appId: AppId; conversationId: ConversationId; revisionId: AppRevision['id']; draftHash: string; text: string }) {
+    this.db.prepare('INSERT INTO chat_trials(id,appId,conversationId,revisionId,draftHash,text) VALUES(?,?,?,?,?,?)')
+      .run(row.id,row.appId,row.conversationId,row.revisionId,row.draftHash,row.text);
+  }
+  activateTrial(appId: AppId, trialId: string, revisionId: AppRevision['id'], expectedVersion: number) {
+    this.transaction(() => {
+      if (this.apps.get({ id: appId }).version !== expectedVersion) throw new DomainError('VERSION_CONFLICT');
+      this.db.prepare("UPDATE apps SET currentRevisionId=?,status='ready',version=version+1,updatedAt=? WHERE id=?").run(revisionId,timestamp(),appId);
+      this.db.prepare('UPDATE chat_trials SET published=1 WHERE id=? AND appId=?').run(trialId,appId);
+    });
+  }
   saveProvider(value: ProviderProfile, expectedRevision?: number): ProviderProfile {
     return this.transaction(() => {
       if (!schemas.providers.safeParse(value).success) throw new DomainError('INVALID_INPUT');
@@ -206,7 +251,7 @@ export class Storage {
       } finally { this.depth--; }
     });
   }
-  publishRevision(revision: AppRevision, bindings: AppSkill[], expectedAppVersion: number): AppRevision {
+  publishRevision(revision: AppRevision, bindings: AppSkill[], expectedAppVersion: number, activate = true): AppRevision {
     return this.transaction(() => {
       const app = this.apps.get({ id: revision.appId });
       if (app.status === 'archived') throw new DomainError('INVALID_TRANSITION');
@@ -216,7 +261,7 @@ export class Storage {
         this.appSkills.insert(binding);
       }
       const result = this.revisions.insert(revision);
-      this.db.prepare("UPDATE apps SET currentRevisionId=?,status='ready',version=version+1,updatedAt=? WHERE id=?").run(revision.id, revision.createdAt, app.id);
+      if (activate) this.db.prepare("UPDATE apps SET currentRevisionId=?,status='ready',version=version+1,updatedAt=? WHERE id=?").run(revision.id, revision.createdAt, app.id);
       return result;
     });
   }

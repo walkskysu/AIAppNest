@@ -1,3 +1,4 @@
+import { chatRequestSchema, type ChatRequest, type ChatReply } from '@aiappnest/contracts';
 import { runRequestSchema, type RunRequest, type RunReply } from '@aiappnest/contracts';
 import { fork, type ChildProcess, type ForkOptions } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -9,7 +10,7 @@ import { appRequestSchema, type AppReply, type AppRequest } from '@aiappnest/con
 import { skillHostRequestSchema, type SkillHostReply, type SkillHostRequest } from '@aiappnest/contracts';
 import { policyHostRequestSchema, type PolicyHostReply, type PolicyHostRequest } from '@aiappnest/contracts';
 
-type Pending = { kind: 'response' | 'providers-response' | 'apps-response' | 'skills-response' | 'policy-response' | 'runs-response'; operation?: ProviderRequest['operation'] | AppRequest['operation'] | SkillHostRequest['operation'] | PolicyHostRequest['operation'] | RunRequest['operation']; resolve: (result: Result<PingOutput | ProviderReply | AppReply | SkillHostReply | PolicyHostReply | RunReply>) => void; timer: NodeJS.Timeout };
+type Pending = { kind: 'response' | 'providers-response' | 'apps-response' | 'skills-response' | 'policy-response' | 'runs-response' | 'chat-response'; operation?: ProviderRequest['operation'] | AppRequest['operation'] | SkillHostRequest['operation'] | PolicyHostRequest['operation'] | RunRequest['operation'] | ChatRequest['operation']; resolve: (result: Result<PingOutput | ProviderReply | AppReply | SkillHostReply | PolicyHostReply | RunReply | ChatReply>) => void; timer: NodeJS.Timeout };
 export function serviceEnvironment(dataRoot?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'LANG', 'LOCALAPPDATA']) {
@@ -87,7 +88,7 @@ export class ServiceManager extends EventEmitter {
           if (this.status.phase !== 'starting' || message.nonce !== this.nonce || message.pid !== child.pid || message.nodeVersion !== SERVICE_NODE_VERSION) { this.fail('PROTOCOL_ERROR'); return; }
           this.transition('ready');
           this.settleStart({ ok: true, value: this.snapshot() });
-        } else if (message.kind === 'response' || message.kind === 'providers-response' || message.kind === 'apps-response' || message.kind === 'skills-response' || message.kind === 'policy-response' || message.kind === 'runs-response') {
+        } else if (message.kind === 'response' || message.kind === 'providers-response' || message.kind === 'apps-response' || message.kind === 'skills-response' || message.kind === 'policy-response' || message.kind === 'runs-response' || message.kind === 'chat-response') {
           const pending = this.pending.get(message.id);
           if (this.status.phase !== 'ready' || !pending || pending.kind !== message.kind) { this.fail('PROTOCOL_ERROR'); return; }
           if (message.kind !== 'response' && message.result.ok && pending.operation !== message.result.value.operation) { this.fail('PROTOCOL_ERROR'); return; }
@@ -127,6 +128,18 @@ export class ServiceManager extends EventEmitter {
       const timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 75000);
       this.pending.set(id, { kind: 'providers-response', operation: parsed.data.operation, resolve: result => resolve(result as Result<ProviderReply>), timer });
       this.send({ kind: 'providers', id, input: parsed.data });
+    });
+  }
+  chat(input: unknown): Promise<Result<ChatReply>> {
+    const parsed = chatRequestSchema.safeParse(input);
+    if (!parsed.success) return Promise.resolve({ ok: false, error: publicError('INVALID_INPUT') });
+    if (this.status.phase !== 'ready') return Promise.resolve({ ok: false, error: publicError(this.closing ? 'SHUTTING_DOWN' : 'NOT_READY') });
+    if (this.pending.size >= 64) return Promise.resolve({ ok: false, error: publicError('BUSY') });
+    return new Promise(resolve => {
+      const id = randomUUID();
+      const timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
+      this.pending.set(id, { kind: 'chat-response', operation: parsed.data.operation, resolve: result => resolve(result as Result<ChatReply>), timer });
+      this.send({ kind: 'chat', id, input: parsed.data });
     });
   }
   runs(input: unknown): Promise<Result<RunReply>> {

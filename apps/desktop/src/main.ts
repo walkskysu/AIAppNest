@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, session, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, shell, ipcMain, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join, extname } from 'node:path';
@@ -61,6 +61,16 @@ if (!app.requestSingleInstanceLock()) {
     handle(channels.retry, (raw) => emptySchema.safeParse(raw).success ? service!.start() : { ok: false, error: publicError('INVALID_INPUT') });
     handle(channels.ping, (raw) => service!.ping(raw));
     handle(channels.providers, (raw) => service!.providers(raw));
+    handle(channels.chat, raw => service!.chat(raw));
+    handle(channels.external, async raw => {
+      if (typeof raw !== 'string' || raw.length > 4096) return { ok: false, error: publicError('INVALID_INPUT') };
+      try {
+        const url = new URL(raw);
+        if (!['https:','http:'].includes(url.protocol) || url.username || url.password) throw new Error();
+        await shell.openExternal(url.href);
+        return { ok: true, value: true };
+      } catch { return { ok: false, error: publicError('INVALID_INPUT') }; }
+    });
     handle(channels.runs, (raw) => service!.runs(raw));
     handle(channels.apps, (raw) => service!.apps(raw));
     // Identity belongs to this Main document generation; the renderer cannot supply it.

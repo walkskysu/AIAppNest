@@ -1,3 +1,5 @@
+import { chatRequestSchema, chatReplySchema, type ChatRequest, type ChatReply } from './chat';
+export * from './chat';
 import { runRequestSchema, runReplySchema, type RunRequest, type RunReply } from './runs';
 export * from './runs';
 import { z } from 'zod';
@@ -53,7 +55,7 @@ export const resultSchema = <T extends z.ZodType>(value: T) => z.discriminatedUn
   z.strictObject({ ok: z.literal(true), value }),
   z.strictObject({ ok: z.literal(false), error: errorSchema }),
 ]);
-export const channels = Object.freeze({ runs: 'runs:request', status: 'foundation:status', retry: 'foundation:retry', ping: 'foundation:ping', changed: 'foundation:changed', providers: 'providers:request', apps: 'apps:request', skills: 'skills:request', selectSkill: 'skills:select', policy: 'policy:request', selectGrant: 'policy:select', trust: 'policy:trust' });
+export const channels = Object.freeze({ chat: 'chat:request', external: 'chat:external', runs: 'runs:request', status: 'foundation:status', retry: 'foundation:retry', ping: 'foundation:ping', changed: 'foundation:changed', providers: 'providers:request', apps: 'apps:request', skills: 'skills:request', selectSkill: 'skills:select', policy: 'policy:request', selectGrant: 'policy:select', trust: 'policy:trust' });
 const id = z.uuid();
 export const hostInputSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('hello'), version: z.literal(SERVICE_PROTOCOL_VERSION), nonce: id }),
@@ -62,6 +64,7 @@ export const hostInputSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('apps'), id, input: appRequestSchema }),
   z.strictObject({ kind: z.literal('skills'), id, input: skillHostRequestSchema }),
   z.strictObject({ kind: z.literal('policy'), id, input: policyHostRequestSchema }),
+  z.strictObject({ kind: z.literal('chat'), id, input: chatRequestSchema }),
   z.strictObject({ kind: z.literal('runs'), id, input: runRequestSchema }),
   z.strictObject({ kind: z.literal('shutdown') }),
 ]);
@@ -72,12 +75,15 @@ export const hostOutputSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('apps-response'), id, result: resultSchema(appReplySchema) }),
   z.strictObject({ kind: z.literal('skills-response'), id, result: resultSchema(skillHostReplySchema) }),
   z.strictObject({ kind: z.literal('policy-response'), id, result: resultSchema(policyHostReplySchema) }),
+  z.strictObject({ kind: z.literal('chat-response'), id, result: resultSchema(chatReplySchema) }),
   z.strictObject({ kind: z.literal('runs-response'), id, result: resultSchema(runReplySchema) }),
   z.strictObject({ kind: z.literal('fatal'), error: errorSchema }),
 ]);
 export type HostInput = z.infer<typeof hostInputSchema>;
 export type HostOutput = z.infer<typeof hostOutputSchema>;
 export interface DesktopAPI {
+  chat(input: ChatRequest): Promise<Result<ChatReply>>;
+  openExternal(url: string): Promise<Result<boolean>>;
   runs(input: RunRequest): Promise<Result<RunReply>>;
   selectGrantDirectory(scope: { appId: string; conversationId: string }): Promise<Result<GrantSelection>>;
   selectTrustedAutomation(scope: { appId: string; conversationId: string }): Promise<Result<boolean>>;

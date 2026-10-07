@@ -29,6 +29,82 @@ async function launch(t, root = resolve('dist')) {
 }
 async function ready(page) { await page.waitForFunction(() => document.querySelector('[data-testid="phase"]')?.getAttribute('data-phase') === 'ready'); }
 
+test('C01-C10 desktop wizard/chat uses production IPC + Pi with deterministic SSE; never claims live-model acceptance', { timeout:90000 }, async t => {
+  const requests = [];
+  const malicious = '<img src="https://invalid.example/track" onerror="window.PWNED=1"><script>window.PWNED=1</script> [bad](javascript:alert(1))';
+  const server = createServer(async (req,res) => {
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw); requests.push(body);
+    const last = body.messages.at(-1), text = typeof last.content === 'string' ? last.content : last.content.filter(c => c.type === 'text').map(c => c.text).join('');
+    if (text === 'slow') return;
+    const answer = text === 'attack' ? malicious : `回复：${text}`;
+    res.writeHead(200,{ 'content-type':'text/event-stream' });
+    const send = (delta,finish_reason=null) => res.write('data: '+JSON.stringify({ id:'chat-fixture',object:'chat.completion.chunk',created:1,model:'chat-fixture',choices:[{ index:0,delta,finish_reason }] })+'\n\n');
+    send({ role:'assistant',content:answer.slice(0,3) });
+    setTimeout(() => { send({ content:answer.slice(3) }); send({},'stop'); res.end('data: [DONE]\n\n'); },80);
+  });
+  server.listen(0,'127.0.0.1'); await once(server,'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const { page,profile } = await launch(t); await ready(page);
+  await page.getByRole('button',{ name:'创建应用',exact:true }).click();
+  await page.getByLabel('应用名称',{ exact:true }).fill('完整创建聊天');
+  await page.getByLabel('角色说明',{ exact:true }).fill('中文助手');
+  await page.getByLabel('开场白',{ exact:true }).fill('欢迎开始');
+  await page.getByRole('button',{ name:'配置模型和凭据',exact:true }).click();
+  await page.getByLabel('显示名称',{ exact:true }).fill('聊天夹具');
+  await page.getByLabel('协议',{ exact:true }).selectOption('local-openai');
+  await page.getByLabel('端点',{ exact:true }).fill(`http://127.0.0.1:${server.address().port}/v1`);
+  await page.getByLabel('模型 ID',{ exact:true }).fill('chat-fixture');
+  await page.getByRole('button',{ name:'保存模型',exact:true }).click();
+  await page.getByTestId('provider-feedback').filter({ hasText:'已保存' }).waitFor();
+  await page.getByRole('button',{ name:'刷新模型选项',exact:true }).click();
+  await page.getByLabel('应用模型',{ exact:true }).selectOption({ label:'聊天夹具 · chat-fixture · v1' });
+  await page.getByRole('button',{ name:'测试所选模型连接',exact:true }).click();
+  await page.getByTestId('app-feedback').filter({ hasText:'SUCCESS' }).waitFor();
+  await page.getByRole('button',{ name:'保存应用草稿',exact:true }).click();
+  await page.getByTestId('app-feedback').filter({ hasText:'草稿已保存' }).waitFor();
+  await page.getByLabel('测试任务',{ exact:true }).fill('测试创建');
+  await page.getByRole('button',{ name:'提交隔离试运行',exact:true }).click();
+  await page.getByTestId('app-space').getByText('已完成',{ exact:true }).waitFor();
+  await page.getByRole('button',{ name:'刷新试运行结果',exact:true }).click();
+  await page.getByLabel('输出要求',{ exact:true }).fill('修改后测试失效');
+  assert.equal(await page.getByRole('button',{ name:'发布配置版本',exact:true }).isDisabled(),true);
+  await page.getByLabel('输出要求',{ exact:true }).fill('');
+  await page.getByRole('button',{ name:'保存应用草稿',exact:true }).click();
+  await page.getByRole('button',{ name:'发布配置版本',exact:true }).click();
+  await page.getByTestId('app-feedback').filter({ hasText:'已发布测试过' }).waitFor();
+  await page.getByRole('button',{ name:'关闭编辑',exact:true }).click();
+  const before = requests.length;
+  await page.getByTestId('app-card').getByRole('button',{ name:'打开应用',exact:true }).click();
+  await page.getByRole('button',{ name:'新建对话',exact:true }).click();
+  await page.getByText('欢迎开始',{ exact:true }).waitFor(); assert.equal(requests.length,before);
+  const input = page.getByLabel('输入任务',{ exact:true });
+  await input.fill('中文提交');
+  await input.dispatchEvent('compositionstart'); await input.press('Enter'); await wait(100); assert.equal(requests.length,before);
+  await input.dispatchEvent('compositionend');
+  await page.getByRole('button',{ name:'发送',exact:true }).dblclick();
+  await page.getByText('回复：中文提交',{ exact:true }).waitFor(); assert.equal(requests.length,before+1);
+  await input.fill('attack'); await input.press('Enter');
+  await page.getByText(malicious,{ exact:true }).waitFor();
+  assert.equal(await page.evaluate(() => window.PWNED),undefined);
+  assert.equal(await page.locator('.chat-history img,.chat-history script,.chat-history iframe').count(),0);
+  assert.equal((await page.evaluate(() => window.desktop.openExternal('javascript:alert(1)'))).ok,false);
+  const beforeRefresh = requests.length;
+  await page.reload(); await ready(page);
+  await page.getByTestId('app-card').getByRole('button',{ name:'打开应用',exact:true }).click();
+  await page.getByRole('button',{ name:'新对话',exact:true }).click();
+  await page.getByText(malicious,{ exact:true }).waitFor(); await wait(200); assert.equal(requests.length,beforeRefresh);
+  await input.fill('slow'); await input.press('Enter');
+  await page.getByText('正在执行',{ exact:true }).waitFor();
+  await page.getByRole('button',{ name:'删除会话',exact:true }).click();
+  await page.getByRole('button',{ name:'确认移入回收区',exact:true }).click();
+  await page.getByText('已停止',{ exact:true }).waitFor();
+  await page.getByRole('button',{ name:'确认移入回收区',exact:true }).click();
+  await page.getByTestId('chat-feedback').filter({ hasText:'已移入回收区' }).waitFor();
+  await page.screenshot({ path:join(profile,'chat-verified.png'),fullPage:true });
+  t.diagnostic('Deterministic SSE fixture; real Electron, preload, Service Host, SQLite, Pi and Windows Worker. Not C01 live acceptance; manual visual review remains separate.');
+});
+
 test('K01/K04 desktop library imports through Main dialog token and edits exact version/mode bindings', { timeout:60000 }, async t => {
   const { app,page,profile } = await launch(t); await ready(page);
   const source = join(profile,'中文 Skill 源包'); await mkdir(source);
@@ -87,16 +163,23 @@ test('A01/A02/A07/A08 desktop app management uses forms, persists after service 
   await page.getByLabel('应用模型', { exact: true }).selectOption({ label: '应用配置测试模型 · controlled-not-live-tested · v1' });
   await page.getByRole('button', { name: '保存应用草稿', exact: true }).click();
   await page.getByTestId('app-feedback').filter({ hasText: '草稿已保存' }).waitFor();
-  await page.getByRole('button', { name: '发布配置版本', exact: true }).click();
-  await page.getByTestId('app-feedback').filter({ hasText: '配置版本已发布；未进行端到端试运行' }).waitFor();
+  // Legacy app-service publication remains available; the creation wizard now requires a real trial.
+  assert.equal(await page.getByRole('button', { name: '发布配置版本', exact: true }).isDisabled(),true);
+  await page.evaluate(async () => {
+    const list = await window.desktop.apps({ operation:'list',query:'',archived:false,sort:'name',limit:100,offset:0 });
+    const app = list.value.apps[0];
+    await window.desktop.apps({ operation:'publish',appId:app.id,expectedVersion:app.version });
+  });
+  await page.getByRole('button', { name: '重新加载应用', exact: true }).click();
+  await page.getByRole('button', { name: '刷新应用列表', exact: true }).click();
   await card.getByText('可使用（配置就绪）', { exact: true }).waitFor();
   await page.getByRole('button', { name: '关闭编辑', exact: true }).click();
   await page.getByLabel('搜索应用', { exact: true }).fill('中文描述');
   await page.getByRole('button', { name: '搜索', exact: true }).click();
   await card.getByRole('button', { name: '取消收藏', exact: true }).waitFor();
   await card.getByRole('button', { name: '打开应用', exact: true }).click();
-  await page.getByTestId('app-space').getByText('聊天与新建会话尚未接入；未进行端到端试运行。', { exact: true }).waitFor();
-  assert.equal(await page.getByRole('button', { name: '新建对话（尚未接入）', exact: true }).isDisabled(), true);
+  await page.getByTestId('app-space').getByText('从左侧选择会话或新建对话。', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '新建对话', exact: true }).isDisabled(), false);
   assert.equal((await page.evaluate(() => window.desktop.getStatus())).value.pid, pid);
   await page.getByRole('button', { name: '返回应用首页', exact: true }).click();
   await card.getByRole('button', { name: '编辑', exact: true }).click();
@@ -231,7 +314,7 @@ test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload 
   const initial = await page.evaluate(() => window.desktop.getStatus());
   const pid = initial.value.pid;
   const surface = await page.evaluate(() => ({ keys: Object.keys(window.desktop).sort(), require: typeof window.require, process: typeof window.process, ipc: typeof window.ipcRenderer }));
-  assert.deepEqual(surface, { keys: ['apps', 'getStatus', 'onStatusChanged', 'ping', 'policy', 'providers', 'retryService', 'runs', 'selectGrantDirectory', 'selectSkillDirectory', 'selectTrustedAutomation', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
+  assert.deepEqual(surface, { keys: ['apps', 'chat', 'getStatus', 'onStatusChanged', 'openExternal', 'ping', 'policy', 'providers', 'retryService', 'runs', 'selectGrantDirectory', 'selectSkillDirectory', 'selectTrustedAutomation', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
   const prefs = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences());
   for (const key of ['sandbox', 'contextIsolation', 'webSecurity']) assert.equal(prefs[key], true);
   for (const key of ['nodeIntegration', 'nodeIntegrationInWorker', 'nodeIntegrationInSubFrames', 'webviewTag', 'allowRunningInsecureContent']) assert.equal(prefs[key], false, key);

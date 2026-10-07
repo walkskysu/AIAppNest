@@ -206,6 +206,18 @@ CREATE TRIGGER run_transition BEFORE UPDATE ON runs BEGIN
  ) THEN RAISE(ABORT, 'invalid transition') END;
  SELECT CASE WHEN OLD.startedAt IS NOT NULL AND NEW.startedAt IS NOT OLD.startedAt THEN RAISE(ABORT, 'immutable') END;
 END;
+` }, { version: 7, name: 'chat-trials-and-recycle', sql: `
+CREATE TABLE chat_trials (
+ id TEXT PRIMARY KEY, appId TEXT NOT NULL REFERENCES apps(id), conversationId TEXT NOT NULL UNIQUE,
+ revisionId TEXT NOT NULL, draftHash TEXT NOT NULL, text TEXT NOT NULL, published INTEGER NOT NULL DEFAULT 0,
+ FOREIGN KEY(conversationId,appId) REFERENCES conversations(id,appId),
+ FOREIGN KEY(revisionId,appId) REFERENCES app_revisions(id,appId)
+) STRICT;
+CREATE TABLE conversation_recycle (
+ conversationId TEXT PRIMARY KEY, appId TEXT NOT NULL, scope TEXT NOT NULL, createdAt INTEGER NOT NULL,
+ FOREIGN KEY(conversationId,appId) REFERENCES conversations(id,appId)
+) STRICT;
+CREATE INDEX chat_messages_order ON messages(appId,conversationId,createdAt,id);
 ` }];
 
 export function migrate(db: DatabaseSync, steps: readonly Migration[] = migrations): void {
