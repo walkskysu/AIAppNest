@@ -6,6 +6,7 @@ import { CredentialService } from './credentials';
 import { ProviderService } from './providers';
 import { AppService } from './apps';
 import { SkillRegistry } from './skills';
+import { PolicyService } from '../../../packages/policy/src/index';
 
 // Only the owning Main process can access this inherited IPC pipe. No network listener.
 if (!process.send || process.versions.node !== SERVICE_NODE_VERSION) process.exit(1);
@@ -14,7 +15,8 @@ let storage: Storage | undefined;
 let providers: ProviderService | undefined;
 let apps: AppService | undefined;
 let skills: SkillRegistry | undefined;
-const close = () => { storage?.close(); storage = undefined; };
+let policy: PolicyService | undefined;
+const close = () => { policy?.close(); policy = undefined; storage?.close(); storage = undefined; };
 const handshakeDeadline = setTimeout(() => process.exit(1), 5000);
 const send = (message: HostOutput) => {
   if (process.connected) process.send!(message, undefined, undefined, (error) => { if (error) process.exit(1); });
@@ -39,6 +41,7 @@ process.on('message', (raw: unknown) => {
       providers = new ProviderService(storage, new CredentialService(storage.paths, join(__dirname, 'credential-host.exe')));
       skills = new SkillRegistry(storage);
       apps = new AppService(storage, providers, undefined, skills);
+      policy = new PolicyService(storage, (appId, revisionId) => apps!.readRevision(appId, revisionId));
     }
     catch {
       send({ kind: 'fatal', error: publicError('STORAGE_UNAVAILABLE') });
@@ -56,6 +59,8 @@ process.on('message', (raw: unknown) => {
     send({ kind: 'apps-response', id: message.id, result: apps!.request(message.input) });
   } else if (message.kind === 'skills' && ready) {
     send({ kind: 'skills-response', id: message.id, result: skills!.request(message.input) });
+  } else if (message.kind === 'policy' && ready) {
+    send({ kind: 'policy-response', id: message.id, result: policy!.request(message.input) });
   } else {
     send({ kind: 'fatal', error: publicError('PROTOCOL_ERROR') });
     process.disconnect();

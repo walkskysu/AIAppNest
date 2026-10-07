@@ -1,1 +1,1 @@
-{"name":"@aiappnest/pi-adapter","version":"0.0.0","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@aiappnest/contracts":"0.0.0","@mariozechner/pi-ai":"0.73.1"}}
+{"name":"@aiappnest/pi-adapter","version":"0.0.0","private":true,"type":"module","exports":{".":"./src/index.ts","./policy":"./src/policy-session.ts"},"dependencies":{"@aiappnest/contracts":"0.0.0","@mariozechner/pi-ai":"0.73.1"}}

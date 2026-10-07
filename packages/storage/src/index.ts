@@ -324,6 +324,16 @@ export class Storage {
       return rows.map(row => this.memories.get({ appId, id: row.id as Memory['id'], version: row.version as number }));
     });
   }
+  /** Internal PolicyService persistence; never exposed as arbitrary record IPC. */
+  policyRecords(kind: 'grant' | 'approval' | 'trust', appId?: string, conversationId?: string): string[] {
+    return this.db.prepare(`SELECT value FROM policy_records WHERE kind=?${appId === undefined ? '' : ' AND appId=? AND conversationId=?'} ORDER BY id`)
+      .all(...(appId === undefined ? [kind] : [kind, appId, conversationId!])).map(row => row.value as string);
+  }
+  savePolicyRecord<T extends { id: string; appId: string; conversationId: string }>(kind: 'grant' | 'approval' | 'trust', value: T): void {
+    guard(() => { this.db.prepare(`INSERT INTO policy_records VALUES(?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value
+      WHERE policy_records.appId=excluded.appId AND policy_records.conversationId=excluded.conversationId`)
+      .run(kind,value.id,value.appId,value.conversationId,JSON.stringify(value)); });
+  }
   close(): void {
     if (this.closed) return;
     if (this.depth) throw new DomainError('INVALID_INPUT', 'Cannot close during a transaction');

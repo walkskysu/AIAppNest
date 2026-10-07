@@ -185,6 +185,13 @@ DROP TRIGGER skills_immutable_delete;
 CREATE TRIGGER skills_referenced_delete BEFORE DELETE ON skills WHEN EXISTS(
  SELECT 1 FROM app_skills WHERE skillId=OLD.id AND skillVersion=OLD.version)
  BEGIN SELECT RAISE(ABORT, 'ownership mismatch'); END;
+` }, { version: 5, name: 'policy-state', sql: `
+CREATE TABLE policy_records (
+ kind TEXT NOT NULL CHECK(kind IN ('grant','approval','trust')), id TEXT NOT NULL,
+ appId TEXT NOT NULL, conversationId TEXT NOT NULL, value TEXT NOT NULL CHECK(json_valid(value)),
+ PRIMARY KEY(kind,id), FOREIGN KEY(conversationId,appId) REFERENCES conversations(id,appId)
+) STRICT;
+CREATE INDEX policy_records_scope ON policy_records(appId,conversationId,kind);
 ` }];
 
 export function migrate(db: DatabaseSync, steps: readonly Migration[] = migrations): void {

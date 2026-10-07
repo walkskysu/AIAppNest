@@ -3,6 +3,8 @@ import { channels, pingInputSchema, pingOutputSchema, publicError, resultSchema,
 import { providerRequestSchema, providerReplySchema } from '@aiappnest/contracts';
 import { appRequestSchema, appReplySchema } from '@aiappnest/contracts';
 import { skillRequestSchema, skillReplySchema, skillSelectionSchema } from '@aiappnest/contracts';
+import { policyRequestSchema, policyReplySchema, policyScopeSchema, grantSelectionSchema } from '@aiappnest/contracts';
+import { z } from 'zod';
 
 const callbacks = new Set<(status: ServiceStatus) => void>();
 // One native listener per document, regardless of Vue component subscription count.
@@ -13,6 +15,24 @@ const listener = (_event: unknown, raw: unknown) => {
 ipcRenderer.on(channels.changed, listener);
 window.addEventListener('unload', () => { callbacks.clear(); ipcRenderer.removeListener(channels.changed, listener); });
 const api: DesktopAPI = {
+  selectGrantDirectory: async scope => {
+    const input = policyScopeSchema.safeParse(scope);
+    if (!input.success) return { ok: false, error: publicError('INVALID_INPUT') };
+    const reply = resultSchema(grantSelectionSchema).safeParse(await ipcRenderer.invoke(channels.selectGrant, input.data));
+    return reply.success ? reply.data : { ok: false, error: publicError('PROTOCOL_ERROR') };
+  },
+  selectTrustedAutomation: async scope => {
+    const input = policyScopeSchema.safeParse(scope);
+    if (!input.success) return { ok: false, error: publicError('INVALID_INPUT') };
+    const reply = resultSchema(z.boolean()).safeParse(await ipcRenderer.invoke(channels.trust, input.data));
+    return reply.success ? reply.data : { ok: false, error: publicError('PROTOCOL_ERROR') };
+  },
+  policy: async input => {
+    const parsed = policyRequestSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, error: publicError('INVALID_INPUT') };
+    const reply = resultSchema(policyReplySchema).safeParse(await ipcRenderer.invoke(channels.policy, parsed.data));
+    return reply.success && (!reply.data.ok || reply.data.value.operation === parsed.data.operation) ? reply.data : { ok: false, error: publicError('PROTOCOL_ERROR') };
+  },
   selectSkillDirectory: async () => {
     const parsed = resultSchema(skillSelectionSchema).safeParse(await ipcRenderer.invoke(channels.selectSkill,{}));
     return parsed.success ? parsed.data : { ok:false,error:publicError('PROTOCOL_ERROR') };

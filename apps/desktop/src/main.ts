@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { channels, emptySchema, publicError, skillRequestSchema, type Result, type ServiceStatus } from '@aiappnest/contracts';
 import { ServiceManager } from './service-manager';
+import { policyScopeSchema, policyRequestSchema, trustedBoundaryNotice } from '@aiappnest/contracts';
 
 declare const __DEV__: boolean;
 const origin = 'app://desktop';
@@ -63,6 +64,36 @@ if (!app.requestSingleInstanceLock()) {
     handle(channels.apps, (raw) => service!.apps(raw));
     // Identity belongs to this Main document generation; the renderer cannot supply it.
     let skillOwner = randomUUID(), choosingSkill = false;
+    let choosingPolicy = false;
+    // Native dialogs are the only source of external paths and explicit trust consent.
+    for (const channel of [channels.selectGrant, channels.trust]) ipcMain.handle(channel, async (event, raw: unknown) => {
+      if (!trusted(event)) return { ok: false, error: publicError('FORBIDDEN') };
+      const parsed = policyScopeSchema.safeParse(raw);
+      if (!parsed.success) return { ok: false, error: publicError('INVALID_INPUT') };
+      if (choosingPolicy) return { ok: false, error: publicError('BUSY') };
+      choosingPolicy = true; const owner = skillOwner;
+      try {
+        if (channel === channels.trust) {
+          const result = await dialog.showMessageBox(window!, { type: 'warning', title: '启用可信自动化', message: trustedBoundaryNotice,
+            buttons: ['取消', '我信任此应用，启用'], defaultId: 0, cancelId: 0, noLink: true });
+          if (!trusted(event) || owner !== skillOwner) return { ok: false, error: publicError('FORBIDDEN') };
+          if (result.response !== 1) return { ok: true, value: false };
+          const reply = await service!.policy({ operation: 'trust', ...parsed.data, notice: trustedBoundaryNotice });
+          return reply.ok ? { ok: true, value: reply.value.operation === 'trust' } : reply;
+        }
+        const result = await dialog.showOpenDialog(window!, { title: '选择授权目录', properties: ['openDirectory'] });
+        if (!trusted(event) || owner !== skillOwner) return { ok: false, error: publicError('FORBIDDEN') };
+        if (result.canceled || !result.filePaths[0]) return { ok: true, value: null };
+        const reply = await service!.policy({ operation: 'select', ...parsed.data, owner, path: result.filePaths[0], scope: 'policy-directory' });
+        return reply.ok ? reply.value.operation === 'select' ? { ok: true, value: reply.value.selection } : { ok: false, error: publicError('PROTOCOL_ERROR') } : reply;
+      } finally { choosingPolicy = false; }
+    });
+    handle(channels.policy, async raw => {
+      const input = policyRequestSchema.safeParse(raw);
+      if (!input.success) return { ok: false, error: publicError('INVALID_INPUT') };
+      const reply = await service!.policy({ operation: 'request', owner: skillOwner, request: input.data });
+      return reply.ok ? reply.value.operation === 'request' ? { ok: true, value: reply.value.reply } : { ok: false, error: publicError('PROTOCOL_ERROR') } : reply;
+    });
     ipcMain.handle(channels.selectSkill, async (event, raw: unknown) => {
       if (!trusted(event)) return { ok:false,error:publicError('FORBIDDEN') };
       if (!emptySchema.safeParse(raw).success) return { ok:false,error:publicError('INVALID_INPUT') };
