@@ -1,4 +1,6 @@
-import { MemoryService } from '../../../packages/memory/src/index';
+import { MemoryService, CandidateService } from '../../../packages/memory/src/index';
+import { extractRuntime } from '../../../packages/pi-adapter/src/extract';
+import type { ExtractionTask } from '../../../packages/storage/src/candidates';
 import { FileService, FileError } from './files';
 import { createHash, randomUUID } from 'node:crypto';
 import { sep } from 'node:path';
@@ -23,6 +25,7 @@ export interface Worker {
 }
 export interface RunPlan { model: string; local: boolean; roots: string[]; exclusive: boolean; text: string; snapshot: Record<string, unknown>; workerKey?: string }
 export interface SchedulerOptions {
+  extract?: (task:ExtractionTask,input:{system:string;text:string;maxTokens:number},signal:AbortSignal)=>Promise<string>;
   concurrency?: number; localConcurrency?: number; modelLimits?: Record<string, number>; queueLimit?: number;
   queueTimeoutMs?: number; idleTtlMs?: number; abortMs?: number;
   prepare?: (input: Submit) => RunPlan;
@@ -53,6 +56,7 @@ export class RunScheduler {
   private recovery: Recovery;
   private log: DiagnosticLog;
   private lastTick=Date.now();
+  private extracting?: {controller:AbortController;done:Promise<void>};
   /** Seal new submissions before cancellation. Idle workers also exit before soft deletion. */
   retireConversation(appId: string, conversationId: string): boolean {
     this.storage.conversations.get({ appId: id<'app'>(appId), id: id<'conversation'>(conversationId) });
@@ -75,6 +79,7 @@ export class RunScheduler {
     this.recovery = new Recovery(this.storage);
     this.log = new DiagnosticLog(this.storage);
     this.recovery.reconcile();
+    this.storage.candidates.recover();
     services.policy.on('event', this.policyEvent);
     this.timer = setInterval(() => { try { this.flush(); this.tick(); } catch { this.storageFailure(); } }, 40);
     this.timer.unref();
@@ -207,6 +212,9 @@ export class RunScheduler {
       entry.retiring = entry.worker.close().then(() => { this.workers.delete(key); this.schedule(); }, () => this.storageFailure());
     }
     if (this.stopped || this.failed) return;
+    // Background extraction acquires an exclusive global scheduler slot. Main work has priority.
+    // This conservative admission also obeys every local/model limit (all are >= 1).
+    if(this.extracting) return;
     const earlier: Job[] = [];
     for (const job of [...this.queue]) {
       if (Date.now() - job.run.createdAt - (job.suspendedMs ?? 0) >= (this.options.queueTimeoutMs ?? 300000)) {
@@ -225,6 +233,39 @@ export class RunScheduler {
       job.run = this.change(job.run, 'starting');
       this.active.set(job.run.id, job);
       job.done = this.execute(job);
+    }
+    if(!this.active.size && !this.queue.length) this.extractNext();
+  }
+  private extractNext() {
+    const next=this.storage.candidates.pending()[0];if(!next) return;
+    const controller=new AbortController();
+    const done=this.executeExtraction(next,controller.signal);
+    this.extracting={controller,done};
+    void done.finally(()=>{this.extracting=undefined;this.schedule();});
+  }
+  private async executeExtraction(next:ExtractionTask,signal:AbortSignal) {
+    let task=next;
+    try {
+      const candidates=new CandidateService(this.storage);
+      let input;
+      try { input=candidates.input(task); }
+      catch { this.storage.candidates.transition(task,'cancelled','SOURCE_UNAVAILABLE');return; }
+      task=this.storage.candidates.transition(task,'running');
+      let raw:string;
+      if(this.options.extract) raw=await this.options.extract(task,input,signal);
+      else {
+        const conversation=this.storage.conversations.get({appId:id<'app'>(task.appId),id:id<'conversation'>(task.sourceConversationId)});
+        const {snapshot}=this.services.apps.readRevision(task.appId,conversation.revisionId);
+        const provider=this.services.providers.snapshotRuntime(snapshot.credentialBinding,snapshot.provider);
+        raw=await extractRuntime(provider,input,signal);
+      }
+      if(signal.aborted) throw new Error('INTERRUPTED');
+      candidates.finish(task,raw);
+    } catch {
+      try {
+        let revoked=false;try {new CandidateService(this.storage).source(task);} catch {revoked=true;}
+        this.storage.candidates.transition(task,revoked?'cancelled':'failed',revoked?'SOURCE_UNAVAILABLE':signal.aborted?'INTERRUPTED':'EXTRACTION_FAILED');
+      } catch { /* Extraction persistence failure never rewrites the completed source run. Startup reconciles running tasks. */ }
     }
   }
   private change(run: Run, state: RunState): Run {
@@ -327,6 +368,8 @@ export class RunScheduler {
       if (reusable) { const entry = this.workers.get(key); if (entry) { entry.busy = false; entry.idleAt = Date.now(); } }
       else this.workers.delete(key);
       this.active.delete(job.run.id); this.schedule();
+      // Separate transaction and error boundary after original completion. No automatic retry.
+      try { new CandidateService(this.storage).enqueue(this.getRun(job.run.appId,key,job.run.id)); } catch { /* Source run remains authoritative. */ }
     }
   }
   private engineEvent(event: EngineEvent) {
@@ -405,15 +448,18 @@ export class RunScheduler {
   }
   private storageFailure() {
     this.failed = true;
+    this.extracting?.controller.abort();
     this.pending=[]; this.pendingBytes=0; this.queue=[];
     for (const job of this.active.values()) { job.controller.abort(); try { this.services.policy.cancel(job.run.id); } catch { /* storage already failed */ } void job.worker?.close(true).catch(() => {}); }
   }
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.stopped = true; clearInterval(this.timer);
+    this.extracting?.controller.abort();
     this.closing = (async () => {
       if (!this.failed) for (const job of [...this.queue, ...this.active.values()]) this.cancel(this.getRun(job.run.appId, job.run.conversationId, job.run.id));
       await Promise.all([...this.active.values()].map(job => job.done));
+      await this.extracting?.done;
       await Promise.all([...this.workers.values()].map(entry => entry.retiring ?? entry.worker.close(true)));
       this.flush(); this.workers.clear(); this.subscriptions.clear(); this.services.policy.off('event', this.policyEvent);
     })();

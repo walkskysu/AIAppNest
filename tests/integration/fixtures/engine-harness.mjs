@@ -11,7 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const bundle = mkdtempSync(resolve('.test-engine-bundle-'));
 await build({ entryPoints: ['tests/integration/fixtures/engine-entry.ts'], outfile: join(bundle, 'entry.mjs'), bundle: true, platform: 'node', format: 'esm', packages: 'external' });
-export const { Recovery, DiagnosticLog, diagnostics, activeTimeout, readSession, projectionId, DomainError, MemoryService, estimateTokens, keywords, memoryText, memoryHash, FileService, fileLimits, ChatService, RunFeed, safeExternal, shouldSubmit, RunScheduler, Storage, AppService, SkillRegistry, ProviderService, PolicyService, PiAdapter, readEngineRuntime, JsonlDecoder } = await import(pathToFileURL(join(bundle, 'entry.mjs')));
+export const { extractRuntime, CandidateService, extractionLimits, Recovery, DiagnosticLog, diagnostics, activeTimeout, readSession, projectionId, DomainError, MemoryService, estimateTokens, keywords, memoryText, memoryHash, FileService, fileLimits, ChatService, RunFeed, safeExternal, shouldSubmit, RunScheduler, Storage, AppService, SkillRegistry, ProviderService, PolicyService, PiAdapter, readEngineRuntime, JsonlDecoder } = await import(pathToFileURL(join(bundle, 'entry.mjs')));
 after(() => rmSync(bundle, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 export const runtime = readEngineRuntime(resolve('dist'));
 export const ok = result => { assert.equal(result.ok, true, JSON.stringify(result)); return result.value; };
@@ -39,7 +39,7 @@ export async function fixture(t, options = {}) {
       send({ role: 'assistant', tool_calls: [{ index: 0, id: randomUUID(), type: 'function', function: { name: tool.name, arguments: JSON.stringify(tool.args) } }] });
       send({}, 'tool_calls');
     } else {
-      let answer = last.role === 'tool' ? 'Recovered from tool result.' : `你好 🌏 ${text}`;
+      let answer = options.extractionOutput && body.messages.some(m=>m.role==='system' && typeof m.content==='string' && m.content.includes('Extract durable')) ? options.extractionOutput : last.role === 'tool' ? 'Recovered from tool result.' : `你好 🌏 ${text}`;
       if (text === 'recall') answer = body.messages.filter(m => m.role === 'user').map(m => typeof m.content === 'string' ? m.content : (m.content ?? []).filter(c => c.type === 'text').map(c => c.text).join('')).join('|');
       if (text === 'large') answer = '界'.repeat(150000);
       send({ role: 'assistant', content: '' });

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "records": [
+    { "id": "phrase", "content": "回答偏好：请使用简短中文回答。" },
+    { "id": "proper", "content": "项目约定：飞书多维表格用于需求跟踪。" },
+    { "id": "mixed", "content": "开发环境：使用 ＶＳ Ｃｏｄｅ 与 TypeScript 开发 Windows 应用。" },
+    { "id": "negative", "content": "饮品偏好：我不喜欢咖啡，喜欢茶。" },
+    { "id": "positive", "content": "饮品偏好：我喜欢咖啡。" },
+    { "id": "duplicate", "content": "回答偏好:请使用简短中文回答!" },
+    { "id": "astral", "content": "术语：𠮷野家与上海虹桥。" },
+    { "id": "fuzzy", "content": "技术选择：使用 PostgreSQL 数据库。" }
+  ],
+  "queries": [
+    { "text": "简短中文", "mode": "phrase", "expected": ["phrase", "duplicate"] },
+    { "text": "飞书多维表格", "mode": "phrase", "expected": ["proper"] },
+    { "text": "vs code", "mode": "phrase", "expected": ["mixed"] },
+    { "text": "TypeScript Windows", "mode": "terms", "expected": ["mixed"] },
+    { "text": "不喜欢咖啡", "mode": "phrase", "expected": ["negative"] },
+    { "text": "喜欢咖啡", "mode": "phrase", "expected": ["negative", "positive"], "note": "Substring search does not infer negation; display original text." },
+    { "text": "回答偏好：请使用简短中文回答。", "mode": "phrase", "expected": ["phrase", "duplicate"] },
+    { "text": "𠮷野家", "mode": "phrase", "expected": ["astral"] },
+    { "text": "PostgreSGL", "mode": "fuzzy", "expected": ["fuzzy"] },
+    { "text": "茶", "mode": "phrase", "expected": ["negative"] },
+    { "text": "量子计算", "mode": "phrase", "expected": [] }
+  ]
+}

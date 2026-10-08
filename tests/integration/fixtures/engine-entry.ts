@@ -1,4 +1,5 @@
-export { MemoryService, estimateTokens, keywords, memoryText, memoryHash } from '../../../packages/memory/src/index';
+export { MemoryService, CandidateService, extractionLimits, estimateTokens, keywords, memoryText, memoryHash } from '../../../packages/memory/src/index';
+export { extractRuntime } from '../../../packages/pi-adapter/src/extract';
 export { Storage } from '@aiappnest/storage';
 export { FileService, fileLimits } from '../../../apps/service-host/src/files';
 export { AppService } from '../../../apps/service-host/src/apps';

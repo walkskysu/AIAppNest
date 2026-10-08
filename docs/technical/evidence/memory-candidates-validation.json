@@ -1,0 +1,44 @@
+{
+  "issue": 18,
+  "reference": "Refs #18",
+  "date": "2026-10-09",
+  "implementationStage": "draft-pr-final-acceptance-pending",
+  "automated": {
+    "targetedCommand": "node --test --test-concurrency=1 tests/integration/candidates.test.mjs tests/integration/chinese-search.test.mjs tests/integration/recovery.test.mjs tests/integration/storage.test.mjs",
+    "targetedPassed": 44,
+    "targetedFailed": 0,
+    "typecheck": "passed",
+    "productionBuild": "passed",
+    "diffWhitespace": "passed",
+    "model": "deterministic HTTP SSE and injected fixtures; real Pi, extraction worker, scheduler, SQLite and production Host IPC",
+    "localFullSuite": "not passed: Electron AppContainer ACL and CurrentUser DPAPI environment failures; additionally exposed a message-index recovery regression which was fixed and passed targeted verification",
+    "localDesktop": "blocked-at-launch-by-Electron-installation-ACL",
+    "hostFullSuite": "See draft PR host Validation; not claimed in advance"
+  },
+  "searchDataset": {
+    "path": "tests/fixtures/chinese-search.json",
+    "version": 1,
+    "queries": 11,
+    "corpora": 2,
+    "expectedSetsPassed": 22,
+    "generalSemanticRecallClaim": false
+  },
+  "benchmark": {
+    "path": "docs/technical/evidence/memory-candidates-benchmark.json",
+    "memoriesInOneApp": 10000,
+    "targetP95Ms": 300,
+    "warmSearchP95Ms": 24.0022,
+    "reopenedSearchP95Ms": 30.0828,
+    "warmInjectionP95Ms": 168.9739,
+    "reopenedInjectionP95Ms": 154.3177,
+    "trueColdPhysicalDisk": "not executed"
+  },
+  "pendingAcceptance": [
+    "H01-H11 real-model and human acceptance",
+    "#17 actual Windows sleep/wake, restricted physical disk volume, human UI acceptance",
+    "Predecessor Engine/Chat/File/Memory real-model and human acceptance",
+    "Representative real-data and OS cold-cache benchmark"
+  ],
+  "finalAcceptancePassed": false,
+  "closeIssue": false
+}

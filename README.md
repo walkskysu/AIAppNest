@@ -38,6 +38,8 @@ npm.cmd test        # 类型检查、生产构建、真实进程测试及已有 
 
 应用空间支持“记住这条”和手动记忆管理：确认编辑、类型过滤、停用、删除与来源跳转。启用应用记忆并发布后，新会话按相关性、版本和剩余上下文预算检索，右侧可查看各轮原始参考版本。删除停止未来检索，旧会话与备份仍可能含内容。详见 [记忆设计](docs/technical/memory-architecture.md) 和 [M01–M10 验收记录](docs/technical/memory-validation.md)；真实模型及人工验收未完成，Refs #16 的 PR 保持草稿。
 
+应用配置还可显式开启“自动提取待审核候选”（默认关闭）：从成功运行的用户消息生成候选，独立排队和记录失败。候选必须经用户接受、修改后接受、替代或合并才成为有效记忆；疑似冲突保留来源及版本关系。记忆管理页提供本应用记忆/会话的中文短语、术语和基础模糊搜索、片段、分页及派生索引重建。详见 [候选与中文索引设计](docs/technical/memory-candidates-architecture.md)、[H01–H11 验证及 1 万条基准](docs/technical/memory-candidates-validation.md)。Refs #18，真实模型、物理环境和人工验收待补，PR 保持草稿。
+
 RunScheduler 提供同会话串行、全局/模型额度、重叠目录写锁、事务幂等、取消受理与终止状态、审批、空闲 TTL 和退出清理。`window.desktop.runs` 暴露业务操作及持久化游标订阅；启动不重放遗留任务。配置、IPC 使用方式和 R01–R12 Windows 验证见 [RunScheduler 记录](docs/technical/run-validation.md)。
 
 正式 PiAdapter 已提供固定运行时启动、平台权限扩展、JSONL 平台事件、有界输出、取消证据和按真实 sessionFile 的精确恢复，由聊天工作空间通过 RunScheduler 管理。内部接口及重试责任见 [Engine 架构](docs/technical/engine-architecture.md)，真实 Windows Pi 测试与尚待完成的真实模型验收见 [E01–E11 验证记录](docs/technical/engine-validation.md)。

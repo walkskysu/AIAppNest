@@ -78,6 +78,16 @@ test('S03 migration failure/history drift/future schema/corrupt files fail witho
   fails(() => new Storage(brokenRoot),'STORAGE_UNAVAILABLE'); assert.deepEqual(readFileSync(path),bytes);
 });
 
+test('H08 migration 9 to 10 builds Chinese index from latest active originals without reviving deleted versions',t=>{
+  const {root}=fixture(t),legacyRoot=join(root,'legacy');mkdirSync(join(legacyRoot,'data'),{recursive:true});
+  const db=new DatabaseSync(join(legacyRoot,'data','platform.db'));db.exec('PRAGMA foreign_keys=ON');migrate(db,migrations.slice(0,9));
+  const appId=uuid(),activeId=uuid(),deletedId=uuid();
+  db.prepare("INSERT INTO apps(id,name,description,icon,status,currentRevisionId,version,createdAt,updatedAt) VALUES(?,'legacy','',NULL,'draft',NULL,1,?,?)").run(appId,now,now);
+  const insert=db.prepare('INSERT INTO memories(id,appId,version,type,content,status,confidence,sourceConversationId,sourceRunId,sourceMessageId,createdAt,updatedAt,expiresAt,priority) VALUES(?,?,?,\'fact\',?,?,NULL,NULL,NULL,NULL,?,?,NULL,0)');
+  insert.run(activeId,appId,1,'升级中文索引 活跃','active',now,now);insert.run(deletedId,appId,1,'升级中文索引 删除','active',now,now);insert.run(deletedId,appId,2,'升级中文索引 删除','deleted',now,now);db.close();
+  const storage=new Storage(legacyRoot);try{const result=storage.search.search(appId,'升级中文索引','memory','phrase',20,0);assert.equal(result.total,1);assert.equal(result.hits[0].id,activeId);assert.equal(storage.memories.list({appId}).length,3);}finally{storage.close();}
+});
+
 test('S04 app/revision/conversation/run ownership enforced by repositories and composite foreign keys', t => {
   const { storage, raw } = fixture(t); const a = seed(storage), b = seed(storage);
   assert.throws(() => raw.prepare('UPDATE apps SET currentRevisionId=? WHERE id=?').run(b.revision.id,a.app.id),/FOREIGN KEY/);

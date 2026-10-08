@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { DomainError } from '@aiappnest/domain';
+import { registerSearchFunctions } from './search';
 
 export interface Migration { version: number; name: string; sql: string }
 // Identifiers and transition literals below are source-controlled, never request data.
@@ -242,9 +243,62 @@ ${immutable('run_attachments')}
 ALTER TABLE memories ADD COLUMN priority INTEGER NOT NULL DEFAULT 0 CHECK(priority BETWEEN 0 AND 100);
 ALTER TABLE run_memory_links ADD COLUMN position INTEGER NOT NULL DEFAULT 0 CHECK(position>=0);
 CREATE INDEX memories_latest ON memories(appId,id,version DESC);
+` }, { version:10,name:'memory-candidates-and-chinese-search',sql:`
+CREATE TABLE extraction_tasks (
+ id TEXT PRIMARY KEY,appId TEXT NOT NULL,sourceConversationId TEXT NOT NULL,sourceRunId TEXT NOT NULL,sourceMessageId TEXT NOT NULL,
+ sourceVersion TEXT NOT NULL,policyVersion TEXT NOT NULL,dedupeKey TEXT NOT NULL UNIQUE,
+ state TEXT NOT NULL CHECK(state IN ('pending','running','succeeded','failed','cancelled')),error TEXT,
+ attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 3),version INTEGER NOT NULL DEFAULT 1 CHECK(version>=1),createdAt INTEGER NOT NULL,updatedAt INTEGER NOT NULL,UNIQUE(id,appId),
+ FOREIGN KEY(sourceMessageId,sourceRunId,sourceConversationId,appId) REFERENCES messages(id,runId,conversationId,appId)
+) STRICT;
+CREATE INDEX extraction_scope ON extraction_tasks(appId,createdAt,id);
+CREATE TABLE memory_candidates (
+ memoryId TEXT PRIMARY KEY,appId TEXT NOT NULL,taskId TEXT NOT NULL,
+ normalized TEXT NOT NULL,subject TEXT NOT NULL,memoryVersion INTEGER NOT NULL DEFAULT 1 CHECK(memoryVersion=1),
+ FOREIGN KEY(memoryId,memoryVersion,appId) REFERENCES memories(id,version,appId),
+ FOREIGN KEY(taskId,appId) REFERENCES extraction_tasks(id,appId)
+) STRICT;
+${immutable('memory_candidates')}
+CREATE INDEX candidates_scope ON memory_candidates(appId,normalized);
+CREATE TABLE memory_supersedes (
+ appId TEXT NOT NULL,memoryId TEXT NOT NULL,version INTEGER NOT NULL,supersedesId TEXT NOT NULL,supersedesVersion INTEGER NOT NULL,
+ PRIMARY KEY(memoryId,version,supersedesId),
+ FOREIGN KEY(memoryId,version,appId) REFERENCES memories(id,version,appId),
+ FOREIGN KEY(supersedesId,supersedesVersion,appId) REFERENCES memories(id,version,appId)
+) STRICT;
+${immutable('memory_supersedes')}
+CREATE TABLE search_meta(version INTEGER NOT NULL) STRICT;
+INSERT INTO search_meta VALUES(0);
+CREATE TABLE search_documents (
+ rowid INTEGER PRIMARY KEY,kind TEXT NOT NULL,id TEXT NOT NULL,appId TEXT NOT NULL,conversationId TEXT,
+ version INTEGER NOT NULL,content TEXT NOT NULL,normalized TEXT NOT NULL,grams TEXT NOT NULL,updatedAt INTEGER NOT NULL,expiresAt INTEGER,
+ UNIQUE(kind,id,appId)
+) STRICT;
+CREATE INDEX search_scope ON search_documents(appId,kind,updatedAt,id);
+CREATE VIRTUAL TABLE search_fts USING fts5(grams,content='search_documents',content_rowid='rowid');
+CREATE TRIGGER search_insert AFTER INSERT ON search_documents BEGIN
+ INSERT INTO search_fts(rowid,grams) VALUES(NEW.rowid,NEW.grams); END;
+CREATE TRIGGER search_delete AFTER DELETE ON search_documents BEGIN
+ INSERT INTO search_fts(search_fts,rowid,grams) VALUES('delete',OLD.rowid,OLD.grams); END;
+CREATE TRIGGER memory_search AFTER INSERT ON memories BEGIN
+ DELETE FROM search_documents WHERE kind='memory' AND appId=NEW.appId AND id=NEW.id;
+ INSERT INTO search_documents(kind,id,appId,conversationId,version,content,normalized,grams,updatedAt,expiresAt)
+ SELECT 'memory',NEW.id,NEW.appId,NEW.sourceConversationId,NEW.version,NEW.content,search_normalize(NEW.content),search_grams(NEW.content),NEW.updatedAt,NEW.expiresAt WHERE NEW.status='active'; END;
+CREATE TRIGGER message_search_insert AFTER INSERT ON messages WHEN NEW.status='complete' AND NEW.role IN ('user','assistant') BEGIN
+ INSERT INTO search_documents(kind,id,appId,conversationId,version,content,normalized,grams,updatedAt)
+ VALUES('message',NEW.id,NEW.appId,NEW.conversationId,1,NEW.content,search_normalize(NEW.content),search_grams(NEW.content),NEW.createdAt); END;
+CREATE TRIGGER message_search_update AFTER UPDATE ON messages BEGIN
+ DELETE FROM search_documents WHERE kind='message' AND appId=NEW.appId AND id=NEW.id;
+ INSERT INTO search_documents(kind,id,appId,conversationId,version,content,normalized,grams,updatedAt)
+ SELECT 'message',NEW.id,NEW.appId,NEW.conversationId,1,NEW.content,search_normalize(NEW.content),search_grams(NEW.content),NEW.createdAt WHERE NEW.status='complete' AND NEW.role IN ('user','assistant'); END;
+CREATE TRIGGER message_search_delete AFTER DELETE ON messages BEGIN
+ DELETE FROM search_documents WHERE kind='message' AND appId=OLD.appId AND id=OLD.id; END;
+CREATE TRIGGER conversation_search_archive AFTER UPDATE OF status ON conversations WHEN NEW.status='archived' BEGIN
+ DELETE FROM search_documents WHERE kind='message' AND appId=NEW.appId AND conversationId=NEW.id; END;
 ` }];
 
 export function migrate(db: DatabaseSync, steps: readonly Migration[] = migrations): void {
+  registerSearchFunctions(db);
   db.exec('BEGIN IMMEDIATE');
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL, appliedAt INTEGER NOT NULL) STRICT`);
