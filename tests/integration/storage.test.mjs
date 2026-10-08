@@ -123,8 +123,8 @@ test('S06 nullable message run and session lifecycle; mismatched conversation re
 test('S07 artifacts require consistent app/conversation/run and generated ID paths', t => {
   const { storage } = fixture(t); const a = seed(storage), b = seed(storage); const artifactId = uuid();
   const artifact = { id: artifactId, appId: a.app.id, conversationId: a.conversation.id, runId: a.run.id, relativePath: storage.paths.artifact(a.app.id,a.conversation.id,artifactId), mimeType: 'text/plain', size: 20, hash: 'b'.repeat(64), createdAt: now };
-  assert.deepEqual(storage.artifacts.insert(artifact),artifact);
-  assert.deepEqual(storage.artifacts.list({ appId: a.app.id, conversationId: a.conversation.id }),[artifact]);
+  assert.deepEqual(storage.artifacts.insert(artifact),{ ...artifact,displayName:'',sourceKey:'' });
+  assert.deepEqual(storage.artifacts.list({ appId: a.app.id, conversationId: a.conversation.id }),[{ ...artifact,displayName:'',sourceKey:'' }]);
   const forgedId = uuid();
   fails(() => storage.artifacts.insert({ ...artifact, id: forgedId, relativePath: storage.paths.artifact(a.app.id,a.conversation.id,forgedId), runId: b.run.id }),'OWNERSHIP_MISMATCH');
   fails(() => storage.artifacts.insert({ ...artifact, relativePath: '../outside' }),'INVALID_INPUT');

@@ -62,7 +62,12 @@ export interface Memory {
   createdAt: Timestamp; updatedAt: Timestamp; expiresAt: Timestamp | null;
 }
 export interface RunMemoryLink { runId: RunId; appId: AppId; memoryId: MemoryId; memoryVersion: number; injectedTextHash: string }
+export interface Attachment {
+  id: Id<'attachment'>; appId: AppId; conversationId: ConversationId;
+  relativePath: string; displayName: string; mimeType: string; size: number; hash: string; createdAt: Timestamp;
+}
 export interface Artifact {
+  displayName?: string; sourceKey?: string;
   id: ArtifactId; appId: AppId; conversationId: ConversationId; runId: RunId;
   relativePath: string; mimeType: string; size: number; hash: string; createdAt: Timestamp;
 }

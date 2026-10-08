@@ -1,4 +1,5 @@
 export { Storage } from '@aiappnest/storage';
+export { FileService, fileLimits } from '../../../apps/service-host/src/files';
 export { AppService } from '../../../apps/service-host/src/apps';
 export { SkillRegistry } from '../../../apps/service-host/src/skills';
 export { ProviderService } from '../../../apps/service-host/src/providers';

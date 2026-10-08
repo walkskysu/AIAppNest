@@ -3,6 +3,8 @@ export * from './chat';
 import { runRequestSchema, runReplySchema, type RunRequest, type RunReply } from './runs';
 export * from './runs';
 import { z } from 'zod';
+import { fileHostRequestSchema, fileHostReplySchema, type FileRequest, type FileReply, type FileSelection } from './files';
+export * from './files';
 import { SERVICE_PROTOCOL_VERSION } from '@aiappnest/domain';
 import { providerRequestSchema, providerReplySchema, type ProviderRequest, type ProviderReply } from './providers';
 export * from './providers';
@@ -14,6 +16,7 @@ import { policyHostRequestSchema, policyHostReplySchema, type PolicyRequest, typ
 export * from './policy';
 
 export const errorCodeSchema = z.enum([
+  'FILE_QUOTA', 'FILE_CHANGED', 'FILE_TYPE', 'FILE_CANCELLED', 'FILE_IO',
   'INVALID_INPUT', 'FORBIDDEN', 'NOT_READY', 'START_FAILED', 'START_TIMEOUT',
   'PROTOCOL_ERROR', 'SERVICE_EXITED', 'REQUEST_TIMEOUT', 'SHUTTING_DOWN', 'BUSY', 'STORAGE_UNAVAILABLE',
   'VERSION_CONFLICT', 'NOT_FOUND', 'CREDENTIAL_UNAVAILABLE', 'PROVIDER_IN_USE', 'APP_UNAVAILABLE',
@@ -23,6 +26,8 @@ export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const errorSchema = z.strictObject({ code: errorCodeSchema, message: z.string().max(200) });
 export type PublicError = z.infer<typeof errorSchema>;
 const messages: Record<ErrorCode, string> = {
+  FILE_QUOTA: '文件大小或托管存储配额超限。', FILE_CHANGED: '文件已变化，请重新导入或生成。',
+  FILE_TYPE: '文件类型或内容不受支持。', FILE_CANCELLED: '文件导入已取消。', FILE_IO: '文件操作失败，未登记半成品。请检查磁盘空间和文件状态后重试。',
   SKILL_INTEGRITY: 'Skill 内容完整性校验失败，已阻止使用。请检查源包或版本快照。',
   SKILL_IN_USE: 'Skill 被已发布应用版本引用，不能删除。',
   APP_UNAVAILABLE: '应用已归档、尚未发布或存在活动任务，无法执行此操作。',
@@ -55,9 +60,10 @@ export const resultSchema = <T extends z.ZodType>(value: T) => z.discriminatedUn
   z.strictObject({ ok: z.literal(true), value }),
   z.strictObject({ ok: z.literal(false), error: errorSchema }),
 ]);
-export const channels = Object.freeze({ chat: 'chat:request', external: 'chat:external', runs: 'runs:request', status: 'foundation:status', retry: 'foundation:retry', ping: 'foundation:ping', changed: 'foundation:changed', providers: 'providers:request', apps: 'apps:request', skills: 'skills:request', selectSkill: 'skills:select', policy: 'policy:request', selectGrant: 'policy:select', trust: 'policy:trust' });
+export const channels = Object.freeze({ files: 'files:request', selectAttachment: 'files:select', chat: 'chat:request', external: 'chat:external', runs: 'runs:request', status: 'foundation:status', retry: 'foundation:retry', ping: 'foundation:ping', changed: 'foundation:changed', providers: 'providers:request', apps: 'apps:request', skills: 'skills:request', selectSkill: 'skills:select', policy: 'policy:request', selectGrant: 'policy:select', trust: 'policy:trust' });
 const id = z.uuid();
 export const hostInputSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('files'), id, input: fileHostRequestSchema }),
   z.strictObject({ kind: z.literal('hello'), version: z.literal(SERVICE_PROTOCOL_VERSION), nonce: id }),
   z.strictObject({ kind: z.literal('ping'), id, input: pingInputSchema }),
   z.strictObject({ kind: z.literal('providers'), id, input: providerRequestSchema }),
@@ -69,6 +75,7 @@ export const hostInputSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('shutdown') }),
 ]);
 export const hostOutputSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('files-response'), id, result: resultSchema(fileHostReplySchema) }),
   z.strictObject({ kind: z.literal('ready'), version: z.literal(SERVICE_PROTOCOL_VERSION), nonce: id, pid: z.number().int().positive(), nodeVersion: z.string().max(30) }),
   z.strictObject({ kind: z.literal('response'), id, result: resultSchema(pingOutputSchema) }),
   z.strictObject({ kind: z.literal('providers-response'), id, result: resultSchema(providerReplySchema) }),
@@ -82,6 +89,8 @@ export const hostOutputSchema = z.discriminatedUnion('kind', [
 export type HostInput = z.infer<typeof hostInputSchema>;
 export type HostOutput = z.infer<typeof hostOutputSchema>;
 export interface DesktopAPI {
+  files(input: FileRequest): Promise<Result<FileReply>>;
+  selectAttachment(scope: { appId: string; conversationId: string }): Promise<Result<FileSelection>>;
   chat(input: ChatRequest): Promise<Result<ChatReply>>;
   openExternal(url: string): Promise<Result<boolean>>;
   runs(input: RunRequest): Promise<Result<RunReply>>;

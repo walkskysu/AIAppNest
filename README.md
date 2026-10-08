@@ -1,6 +1,6 @@
 # AIAppNest
 
-Windows 本地 AI 应用工作台。当前提供 Electron + Vue 3 + TypeScript 基础工程、独立 Node Service Host、类型化 IPC、SQLite 持久化、应用首页与配置编辑、不可变版本、复制与归档，以及模型设置、Windows DPAPI 凭据保护和显式连接测试。RunScheduler 已接入 Pi 会话执行与业务 IPC；聊天和试运行界面尚未接入。
+Windows 本地 AI 应用工作台。当前提供 Electron + Vue 3 + TypeScript、独立 Node Service Host、类型化 IPC、SQLite、应用管理、模型设置及 Windows DPAPI 凭据保护。RunScheduler 已接入 Pi、聊天与试运行工作空间、文本附件和文件产物预览；真实模型和人工验收状态见各功能验证记录。
 
 ## 开发启动
 
@@ -34,9 +34,11 @@ npm.cmd test        # 类型检查、生产构建、真实进程测试及已有 
 
 ## 本地持久化
 
+聊天工作空间现支持系统选择文本附件、托管导入、受控任务输出登记、按 Run/会话查看产物、安全文本/PNG/JPEG 预览及显式打开。类型、配额、权限与保留规则见 [FileService 架构](docs/technical/file-architecture.md)，F01–F10 自动化及真实模型待验收项见 [文件验证记录](docs/technical/file-validation.md)。
+
 RunScheduler 提供同会话串行、全局/模型额度、重叠目录写锁、事务幂等、取消受理与终止状态、审批、空闲 TTL 和退出清理。`window.desktop.runs` 暴露业务操作及持久化游标订阅；启动不重放遗留任务。配置、IPC 使用方式和 R01–R12 Windows 验证见 [RunScheduler 记录](docs/technical/run-validation.md)。
 
-正式 PiAdapter 已提供固定运行时启动、平台权限扩展、JSONL 平台事件、有界输出、取消证据和按真实 sessionFile 的精确恢复，已由 RunScheduler 管理；聊天 UI 尚未接入。内部接口及重试责任见 [Engine 架构](docs/technical/engine-architecture.md)，真实 Windows Pi 测试与尚待完成的真实模型验收见 [E01–E11 验证记录](docs/technical/engine-validation.md)。
+正式 PiAdapter 已提供固定运行时启动、平台权限扩展、JSONL 平台事件、有界输出、取消证据和按真实 sessionFile 的精确恢复，由聊天工作空间通过 RunScheduler 管理。内部接口及重试责任见 [Engine 架构](docs/technical/engine-architecture.md)，真实 Windows Pi 测试与尚待完成的真实模型验收见 [E01–E11 验证记录](docs/technical/engine-validation.md)。
 
 权限服务现已实现仅对话、受控文件处理与需明确选择的可信自动化模式。授权绑定固定会话版本，区分读写，外部目录只接受系统选择令牌；工具在实际入口检查路径、撤销和一次性确认。Pi 权限适配由最小测试宿主验证，正式聊天/Worker 队列尚未接入。详见 [Policy 边界与集成契约](docs/technical/policy-architecture.md) 和 [Q01–Q10 验证](docs/technical/policy-validation.md)。
 

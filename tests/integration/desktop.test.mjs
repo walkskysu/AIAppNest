@@ -105,6 +105,64 @@ test('C01-C10 desktop wizard/chat uses production IPC + Pi with deterministic SS
   t.diagnostic('Deterministic SSE fixture; real Electron, preload, Service Host, SQLite, Pi and Windows Worker. Not C01 live acceptance; manual visual review remains separate.');
 });
 
+test('File F01/F02/F03/F07/F10 desktop attachment selection, removal, import failure and inert artifact preview through real IPC/Pi', { timeout:60000 },async t => {
+  const { app,page,profile } = await launch(t); await ready(page);
+  const malicious = '<script>window.PWNED=1</script><img src="https://invalid.example/pixel" onerror="alert(1)">';
+  const server = createServer(async (req,res) => {
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    const last = JSON.parse(raw).messages.at(-1), text = typeof last.content === 'string' ? last.content : last.content.filter(c => c.type === 'text').map(c => c.text).join('');
+    res.writeHead(200,{ 'content-type':'text/event-stream' });
+    const send = (delta,finish_reason = null) => res.write('data: '+JSON.stringify({ id:'file-ui',object:'chat.completion.chunk',created:1,model:'fixture',choices:[{ index:0,delta,finish_reason }] })+'\n\n');
+    if (last.role === 'user') {
+      const grantId = JSON.parse(text.slice(0,text.indexOf('\n'))).grantId;
+      const content = text.match(/<attachment id="[^"]+">\n([\s\S]*?)\n<\/attachment>/)?.[1];
+      assert.equal(content,malicious);
+      send({ role:'assistant',tool_calls:[{ index:0,id:'ui-output',type:'function',function:{ name:'platform_output',arguments:JSON.stringify({ grantId,path:'result.txt',content }) } }] });
+      send({},'tool_calls');
+    } else { send({ role:'assistant',content:'已生成文件' }); send({},'stop'); }
+    res.end('data: [DONE]\n\n');
+  });
+  server.listen(0,'127.0.0.1'); await once(server,'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const scope = await page.evaluate(async endpoint => {
+    const ok = result => { if (!result.ok) throw Error(result.error.message); return result.value; };
+    const model = ok(await window.desktop.providers({ operation:'save',input:{ config:{ name:'File fixture',providerType:'local-openai',endpoint,modelId:'fixture',authMode:'none',settings:{ timeoutMs:10000 } },credential:{ action:'clear' } } })).profile;
+    const metadata = { name:'文件闭环测试',description:'',icon:'book',category:'',favorite:false };
+    let application = ok(await window.desktop.apps({ operation:'create',metadata })).app;
+    application = ok(await window.desktop.apps({ operation:'update',appId:application.id,expectedVersion:application.version,metadata,draft:{ ...application.draft,role:'File fixture',permissions:{ mode:'controlled-files',tools:['write'] },model:{ providerProfileId:model.id,expectedRevision:model.revision,temperature:0,maxOutputTokens:1024 } } })).app;
+    application = ok(await window.desktop.apps({ operation:'publish',appId:application.id,expectedVersion:application.version })).app;
+    const conversation = ok(await window.desktop.chat({ operation:'create',appId:application.id,conversationId:crypto.randomUUID(),title:'文件测试会话' })).conversation;
+    const scope = { appId:application.id,conversationId:conversation.id };
+    const grant = ok(await window.desktop.policy({ operation:'grants.create',...scope,resource:'output',access:'write',confirmation:'never' })).grant;
+    return { ...scope,grantId:grant.id };
+  },`http://127.0.0.1:${server.address().port}/v1`);
+  await page.reload(); await ready(page);
+  await page.getByTestId('app-card').getByRole('button',{ name:'打开应用',exact:true }).click();
+  await page.getByRole('button',{ name:'文件测试会话',exact:true }).click();
+  const source = join(profile,'中文 附件.txt'); await writeFile(source,malicious);
+  await app.evaluate(({ dialog },path) => { dialog.showOpenDialog = async () => ({ canceled:false,filePaths:[path] }); },source);
+  await page.getByRole('button',{ name:'添加文本附件',exact:true }).click();
+  await page.getByLabel('输入附件',{ exact:true }).getByText('导入完成',{ exact:true }).waitFor();
+  await page.getByRole('button',{ name:'移除输入引用',exact:true }).click();
+  assert.equal(await page.getByRole('button',{ name:'移除输入引用',exact:true }).count(),0);
+  await page.getByRole('button',{ name:'添加文本附件',exact:true }).click();
+  await page.getByRole('button',{ name:'移除输入引用',exact:true }).waitFor();
+  await writeFile(source,'changed original');
+  await page.getByLabel('输入任务',{ exact:true }).fill(JSON.stringify({ grantId:scope.grantId }));
+  await page.getByRole('button',{ name:'发送',exact:true }).click();
+  await page.getByText('已生成文件',{ exact:true }).waitFor();
+  const panel = page.getByTestId('file-panel'); await panel.getByText('result.txt',{ exact:true }).waitFor();
+  await panel.getByRole('button',{ name:'安全预览',exact:true }).click();
+  await page.getByLabel('安全文件预览',{ exact:true }).getByText(malicious,{ exact:true }).waitFor();
+  assert.equal(await page.evaluate(() => window.PWNED),undefined);
+  assert.equal(await page.getByLabel('安全文件预览',{ exact:true }).locator('script,img,iframe,object,a').count(),0);
+  assert.equal((await page.evaluate(({ appId,conversationId }) => window.desktop.files({ operation:'artifacts.preview',appId,conversationId,artifactId:crypto.randomUUID(),path:'C:\\Windows\\win.ini' }),scope)).error.code,'INVALID_INPUT');
+  await app.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled:false,filePaths:['C:\\missing-input.txt'] }); });
+  await page.getByRole('button',{ name:'添加文本附件',exact:true }).click();
+  await page.getByLabel('输入附件',{ exact:true }).getByText(/导入失败/).waitFor();
+  assert.equal(await (await import('node:fs/promises')).readFile(source,'utf8'),'changed original');
+});
+
 test('K01/K04 desktop library imports through Main dialog token and edits exact version/mode bindings', { timeout:60000 }, async t => {
   const { app,page,profile } = await launch(t); await ready(page);
   const source = join(profile,'中文 Skill 源包'); await mkdir(source);
@@ -314,7 +372,7 @@ test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload 
   const initial = await page.evaluate(() => window.desktop.getStatus());
   const pid = initial.value.pid;
   const surface = await page.evaluate(() => ({ keys: Object.keys(window.desktop).sort(), require: typeof window.require, process: typeof window.process, ipc: typeof window.ipcRenderer }));
-  assert.deepEqual(surface, { keys: ['apps', 'chat', 'getStatus', 'onStatusChanged', 'openExternal', 'ping', 'policy', 'providers', 'retryService', 'runs', 'selectGrantDirectory', 'selectSkillDirectory', 'selectTrustedAutomation', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
+  assert.deepEqual(surface, { keys: ['apps', 'chat', 'files', 'getStatus', 'onStatusChanged', 'openExternal', 'ping', 'policy', 'providers', 'retryService', 'runs', 'selectAttachment', 'selectGrantDirectory', 'selectSkillDirectory', 'selectTrustedAutomation', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
   const prefs = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences());
   for (const key of ['sandbox', 'contextIsolation', 'webSecurity']) assert.equal(prefs[key], true);
   for (const key of ['nodeIntegration', 'nodeIntegrationInWorker', 'nodeIntegrationInSubFrames', 'webviewTag', 'allowRunningInsecureContent']) assert.equal(prefs[key], false, key);

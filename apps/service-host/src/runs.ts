@@ -1,6 +1,6 @@
+import { FileService, FileError } from './files';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { sep } from 'node:path';
 import { DomainError, id, timestamp, terminalRunStates, type Run, type RunState, type RunEvent } from '@aiappnest/domain';
 import { publicError, runRequestSchema, type RunRequest, type RunReply, type Result, type ErrorCode, grantSchema } from '@aiappnest/contracts';
 import type { Storage } from '@aiappnest/storage';
@@ -60,7 +60,7 @@ export class RunScheduler {
     }
     return true;
   }
-  constructor(private readonly services: EngineServices & { policy: PolicyService }, private readonly runtime: EngineRuntime,
+  constructor(private readonly services: EngineServices & { policy: PolicyService; files?: FileService }, private readonly runtime: EngineRuntime,
     private readonly options: SchedulerOptions = {}) {
     for (const value of [options.concurrency ?? 2, options.localConcurrency ?? 1, options.queueLimit ?? 100,
       options.queueTimeoutMs ?? 300000, options.idleTtlMs ?? 300000, options.abortMs ?? 1500, ...Object.values(options.modelLimits ?? {})]) {
@@ -83,6 +83,7 @@ export class RunScheduler {
     if (!parsed.success) return { ok: false, error: publicError('INVALID_INPUT') };
     try { return { ok: true, value: this.dispatch(parsed.data) }; }
     catch (error) {
+      if (error instanceof FileError) return { ok:false,error:publicError(error.code) };
       const code = error instanceof DomainError ? error.code : 'NOT_READY';
       if (code === 'STORAGE_UNAVAILABLE') this.storageFailure();
       const exposed: ErrorCode = ['NOT_FOUND','VERSION_CONFLICT','INVALID_INPUT','STORAGE_UNAVAILABLE','BUSY','SHUTTING_DOWN','NOT_READY'].includes(code) ? code as ErrorCode : 'NOT_READY';
@@ -124,18 +125,12 @@ export class RunScheduler {
     this.services.apps.resolveSkills(input.appId, input.revisionId);
     // Resolve credentials before admission; never persist plaintext. Adapter snapshots again before launch.
     const credentials = this.services.providers.snapshotRuntime(snapshot.credentialBinding, snapshot.provider);
-    const grants = this.storage.policyRecords('grant', input.appId, input.conversationId).map(raw => grantSchema.parse(JSON.parse(raw)))
-      .filter(g => !g.revoked && g.revisionId === input.revisionId && g.access === 'write');
+    const availableGrants = this.storage.policyRecords('grant', input.appId, input.conversationId).map(raw => grantSchema.parse(JSON.parse(raw)))
+      .filter(g => !g.revoked && g.revisionId === input.revisionId && snapshot.config.permissions.tools.includes(g.access));
+    const grants = availableGrants.filter(g => g.access === 'write');
     const roots = snapshot.config.permissions.tools.includes('write') ? grants.map(g => canonicalDirectory(g.root)) : [];
-    let text = input.text;
-    for (const attachmentId of input.attachmentIds) {
-      const artifact = this.storage.artifacts.get({ appId: id<'app'>(input.appId), id: id<'artifact'>(attachmentId) });
-      if (artifact.conversationId !== input.conversationId || !artifact.mimeType.startsWith('text/') || artifact.size > 256 * 1024) throw new DomainError('INVALID_INPUT');
-      const path = join(this.storage.paths.root, artifact.relativePath); this.storage.paths.assertManaged(path);
-      const data = readFileSync(path);
-      if (data.length !== artifact.size || createHash('sha256').update(data).digest('hex') !== artifact.hash) throw new DomainError('INVALID_INPUT');
-      text += `\n<attachment id="${attachmentId}">\n${new TextDecoder('utf-8', { fatal: true }).decode(data)}\n</attachment>`;
-    }
+    let text = input.text + (this.services.files ?? new FileService(this.storage)).attachmentText(input,input.attachmentIds);
+    if (availableGrants.length) text += `\n<file-capabilities>Use relative paths with these host-verified grants. Completed writes are registered as artifacts.\n${JSON.stringify(availableGrants.map(g => ({ grantId:g.id,resource:g.resource,access:g.access })))}\n</file-capabilities>`;
     const memory = this.storage.trialForConversation(id<'app'>(input.appId),id<'conversation'>(input.conversationId)) ? '' : this.options.memory?.(input) ?? '';
     if (memory) text += `\n${memory}`;
     if (Buffer.byteLength(text) > 1024 * 1024) throw new DomainError('INVALID_INPUT');
@@ -176,6 +171,7 @@ export class RunScheduler {
       this.storage.messages.insert({ id: id<'message'>(randomUUID()), appId, conversationId, runId: run.id,
         role: 'user', content: input.text, status: 'complete', createdAt: timestamp() });
       this.storage.appendEvent(appId, run.id, 'run.queued', { fingerprint, retryOf: input.retryOf ?? null, ...plan.snapshot });
+      this.storage.linkAttachments(run,input.attachmentIds);
       return run;
     });
     this.queue.push({ run, input, plan, controller: new AbortController() });
@@ -204,7 +200,7 @@ export class RunScheduler {
         || active.some(j => conflict(j, job)) || earlier.some(j => conflict(j, job))
         || this.workers.get(job.run.conversationId)?.retiring) { earlier.push(job); continue; }
       // Refresh authority before taking locks; it may have changed during queue wait.
-      try { job.plan = (this.options.prepare ?? this.prepare.bind(this))(job.input); }
+      try { const refreshed = (this.options.prepare ?? this.prepare.bind(this))(job.input); job.plan = { ...refreshed,text:job.plan.text }; }
       catch { this.queue.splice(this.queue.indexOf(job), 1); this.finish(job.run, 'cancelled', 'CONFIGURATION_UNAVAILABLE'); continue; }
       if (active.some(j => conflict(j, job)) || earlier.some(j => conflict(j, job))) { earlier.push(job); continue; }
       this.queue.splice(this.queue.indexOf(job), 1);

@@ -11,7 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const bundle = mkdtempSync(resolve('.test-engine-bundle-'));
 await build({ entryPoints: ['tests/integration/fixtures/engine-entry.ts'], outfile: join(bundle, 'entry.mjs'), bundle: true, platform: 'node', format: 'esm', packages: 'external' });
-export const { ChatService, RunFeed, safeExternal, shouldSubmit, RunScheduler, Storage, AppService, SkillRegistry, ProviderService, PolicyService, PiAdapter, readEngineRuntime, JsonlDecoder } = await import(pathToFileURL(join(bundle, 'entry.mjs')));
+export const { FileService, fileLimits, ChatService, RunFeed, safeExternal, shouldSubmit, RunScheduler, Storage, AppService, SkillRegistry, ProviderService, PolicyService, PiAdapter, readEngineRuntime, JsonlDecoder } = await import(pathToFileURL(join(bundle, 'entry.mjs')));
 after(() => rmSync(bundle, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 export const runtime = readEngineRuntime(resolve('dist'));
 export const ok = result => { assert.equal(result.ok, true, JSON.stringify(result)); return result.value; };
@@ -28,8 +28,14 @@ export async function fixture(t, options = {}) {
     if (text === 'model-error') { response.writeHead(500); response.end('fixture failure'); return; }
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     const send = (delta, finish_reason = null, usage) => response.write('data: ' + JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture', choices: [{ index: 0, delta, finish_reason }], ...(usage ? { usage } : {}) }) + '\n\n');
-    if (typeof text === 'string' && text.startsWith('tool:') && last.role === 'user') {
-      const tool = JSON.parse(text.slice(5));
+    if (options.fileFlow && last.role === 'user') {
+      const match = text.match(/<attachment id="[^"]+">\n([\s\S]*?)\n<\/attachment>/);
+      assert.ok(match, 'model fixture received managed input');
+      const grant = JSON.parse(text.slice(0,text.indexOf('\n'))).grantId;
+      send({ role:'assistant',tool_calls:[{ index:0,id:randomUUID(),type:'function',function:{ name:'platform_output',arguments:JSON.stringify({ grantId:grant,path:'fixture-result.txt',content:`copied:${match[1]}` }) } }] });
+      send({},'tool_calls');
+    } else if (typeof text === 'string' && text.startsWith('tool:') && last.role === 'user') {
+      const tool = JSON.parse(text.slice(5).split('\n')[0]);
       send({ role: 'assistant', tool_calls: [{ index: 0, id: randomUUID(), type: 'function', function: { name: tool.name, arguments: JSON.stringify(tool.args) } }] });
       send({}, 'tool_calls');
     } else {
@@ -67,8 +73,9 @@ export async function fixture(t, options = {}) {
   }
   app = ok(apps.request({ operation: 'publish', appId: app.id, expectedVersion: app.version })).app;
   const conversation = storage.createConversation(app.id, randomUUID(), 'test');
-  const policy = new PolicyService(storage, (a, r) => apps.readRevision(a, r));
-  const services = { storage, apps, providers, policy }, workers = [], schedulers = [];
+  const files = new FileService(storage);
+  const policy = new PolicyService(storage, (a, r) => apps.readRevision(a, r), options.files ? { registerOutput:(scope,path) => files.registerOutput(scope,path).id } : {});
+  const services = { storage, apps, providers, policy, files }, workers = [], schedulers = [];
   let previousRun;
   const run = () => {
     // Minimal scheduler: retire the previous fixture run before admitting the next.

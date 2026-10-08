@@ -1,3 +1,4 @@
+import { FileService } from './files';
 import { ChatService } from './chat';
 import { hostInputSchema, publicError, type HostOutput } from '@aiappnest/contracts';
 import { SERVICE_NODE_VERSION, SERVICE_PROTOCOL_VERSION } from '@aiappnest/domain';
@@ -22,10 +23,12 @@ let skills: SkillRegistry | undefined;
 let policy: PolicyService | undefined;
 let runs: RunScheduler | undefined;
 let chat: ChatService | undefined;
+let files: FileService | undefined;
 let closing: Promise<void> | undefined;
 const close = () => { policy?.close(); policy = undefined; storage?.close(); storage = undefined; };
 const shutdown = () => closing ??= (async () => {
   ready = false;
+  files?.close();
   try { await runs?.close(); } catch { process.exitCode = 1; }
   finally { close(); if (process.connected) process.disconnect(); }
 })();
@@ -53,8 +56,9 @@ process.on('message', (raw: unknown) => {
       providers = new ProviderService(storage, new CredentialService(storage.paths, join(__dirname, 'credential-host.exe')));
       skills = new SkillRegistry(storage);
       apps = new AppService(storage, providers, undefined, skills);
-      policy = new PolicyService(storage, (appId, revisionId) => apps!.readRevision(appId, revisionId));
-      runs = new RunScheduler({ storage, apps, providers, policy }, readEngineRuntime(__dirname), readRunSettings(storage));
+      files = new FileService(storage);
+      policy = new PolicyService(storage, (appId, revisionId) => apps!.readRevision(appId, revisionId), { registerOutput: (scope,path) => files!.registerOutput(scope,path).id });
+      runs = new RunScheduler({ storage, apps, providers, policy, files }, readEngineRuntime(__dirname), readRunSettings(storage));
       chat = new ChatService(storage, apps, runs);
     }
     catch {
@@ -75,6 +79,8 @@ process.on('message', (raw: unknown) => {
     send({ kind: 'skills-response', id: message.id, result: skills!.request(message.input) });
   } else if (message.kind === 'policy' && ready) {
     send({ kind: 'policy-response', id: message.id, result: policy!.request(message.input) });
+  } else if (message.kind === 'files' && ready) {
+    void files!.request(message.input).then(result => send({ kind:'files-response',id:message.id,result }));
   } else if (message.kind === 'chat' && ready) {
     send({ kind: 'chat-response', id: message.id, result: chat!.request(message.input) });
   } else if (message.kind === 'runs' && ready) {
