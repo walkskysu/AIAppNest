@@ -1,3 +1,4 @@
+import { fileRequestSchema, fileReplySchema, fileScopeSchema, fileSelectionSchema } from '@aiappnest/contracts';
 import { chatRequestSchema, chatReplySchema } from '@aiappnest/contracts';
 import { runRequestSchema, runReplySchema } from '@aiappnest/contracts';
 import { contextBridge, ipcRenderer } from 'electron';
@@ -17,6 +18,18 @@ const listener = (_event: unknown, raw: unknown) => {
 ipcRenderer.on(channels.changed, listener);
 window.addEventListener('unload', () => { callbacks.clear(); ipcRenderer.removeListener(channels.changed, listener); });
 const api: DesktopAPI = {
+  files: async input => {
+    const parsed = fileRequestSchema.safeParse(input);
+    if (!parsed.success) return { ok:false,error:publicError('INVALID_INPUT') };
+    const reply = resultSchema(fileReplySchema).safeParse(await ipcRenderer.invoke(channels.files,parsed.data));
+    return reply.success ? reply.data : { ok:false,error:publicError('PROTOCOL_ERROR') };
+  },
+  selectAttachment: async scope => {
+    const parsed = fileScopeSchema.safeParse(scope);
+    if (!parsed.success) return { ok:false,error:publicError('INVALID_INPUT') };
+    const reply = resultSchema(fileSelectionSchema).safeParse(await ipcRenderer.invoke(channels.selectAttachment,parsed.data));
+    return reply.success ? reply.data : { ok:false,error:publicError('PROTOCOL_ERROR') };
+  },
   chat: async input => {
     const parsed = chatRequestSchema.safeParse(input);
     if (!parsed.success) return { ok: false, error: publicError('INVALID_INPUT') };

@@ -15,8 +15,8 @@ export class DataPaths {
   initialize(): void { for (const directory of ['data', 'apps', 'skills', 'cache', 'logs', 'backups']) this.ensureDirectory(join(this.root, directory)); }
   revision(appId: AppId, revisionId: RevisionId): string { return join(this.root, 'apps', id(appId), 'revisions', id(revisionId)); }
   shared(appId: AppId): string { return join(this.root, 'apps', id(appId), 'shared'); }
-  conversation(appId: AppId, conversationId: ConversationId, area: 'agent' | 'sessions' | 'workspace' | 'artifacts'): string {
-    if (!['agent', 'sessions', 'workspace', 'artifacts'].includes(area)) throw new DomainError('INVALID_INPUT');
+  conversation(appId: AppId, conversationId: ConversationId, area: 'agent' | 'sessions' | 'workspace' | 'artifacts' | 'attachments'): string {
+    if (!['agent', 'sessions', 'workspace', 'artifacts', 'attachments'].includes(area)) throw new DomainError('INVALID_INPUT');
     return join(this.root, 'apps', id(appId), 'conversations', id(conversationId), area);
   }
   artifact(appId: AppId, conversationId: ConversationId, artifactId: ArtifactId): string {

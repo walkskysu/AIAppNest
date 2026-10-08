@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { join, isAbsolute, relative, sep } from 'node:path';
 import {
   DomainError, assertMessageTransition, assertRunTransition, terminalRunStates, timestamp,
-  type App, type AppId, type AppRevision, type AppSkill, type Artifact, type Conversation, type ConversationId,
+  type Attachment, type App, type AppId, type AppRevision, type AppSkill, type Artifact, type Conversation, type ConversationId,
   type Grant, type Memory, type Message, type ProviderProfile, type Run, type RunId, type RunState,
   type RunEvent, type RunMemoryLink, type Skill, type Timestamp,
 } from '@aiappnest/domain';
@@ -33,6 +33,7 @@ export class Storage {
   readonly memories;
   readonly memoryLinks;
   readonly artifacts;
+  readonly attachments;
   readonly providers;
   readonly grants;
 
@@ -69,6 +70,11 @@ export class Storage {
     this.artifacts = make<Artifact, Key<Artifact,'id'|'appId'>, Key<Artifact,'appId'|'conversationId'>>('artifacts', schemas.artifacts, ['id','appId'], ['appId','conversationId'], 'createdAt,id', { validate: value => {
       if (value.relativePath !== this.paths.artifact(value.appId as AppId, value.conversationId as ConversationId, value.id as Artifact['id'])) throw new DomainError('INVALID_INPUT');
       this.paths.assertManaged(join(this.paths.root, value.relativePath as string));
+    } });
+    this.attachments = make<Attachment, Key<Attachment,'id'|'appId'>, Key<Attachment,'appId'|'conversationId'>>('attachments', schemas.attachments, ['id','appId'], ['appId','conversationId'], 'createdAt,id', { validate: value => {
+      const expected = relative(this.paths.root, join(this.paths.conversation(value.appId as AppId, value.conversationId as ConversationId, 'attachments'), value.id as string)).split(sep).join('/');
+      if (value.relativePath !== expected) throw new DomainError('INVALID_INPUT');
+      this.paths.assertManaged(join(this.paths.root, expected));
     } });
     this.providers = make<ProviderProfile, Key<ProviderProfile,'id'>, Record<string,never>>('provider_profiles', schemas.providers, ['id'], [], 'createdAt,id', { json: ['settings'] });
     this.grants = make<Grant, Key<Grant,'id'|'appId'>, AppScope>('grants', schemas.grants, ['id','appId'], ['appId'], 'createdAt,id');
@@ -404,6 +410,26 @@ export class Storage {
     guard(() => { this.db.prepare(`INSERT INTO policy_records VALUES(?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value
       WHERE policy_records.appId=excluded.appId AND policy_records.conversationId=excluded.conversationId`)
       .run(kind,value.id,value.appId,value.conversationId,JSON.stringify(value)); });
+  }
+  fileUsage(appId: string, conversationId: string) {
+    const rows = this.db.prepare('SELECT appId,conversationId,size FROM attachments UNION ALL SELECT appId,conversationId,size FROM artifacts').all();
+    const scoped = rows.filter(r => r.appId === appId && r.conversationId === conversationId);
+    return { total: rows.reduce((n,r) => n + Number(r.size),0), session: scoped.reduce((n,r) => n + Number(r.size),0), count: scoped.length };
+  }
+  linkAttachments(run: Run, attachmentIds: string[]) {
+    for (const attachmentId of attachmentIds) this.db.prepare('INSERT INTO run_attachments VALUES(?,?,?,?)').run(run.id,attachmentId,run.conversationId,run.appId);
+  }
+  registeredArtifact(appId: AppId, runId: RunId, sourceKey: string, hash: string): Artifact | undefined {
+    const row = this.db.prepare('SELECT id FROM artifacts WHERE appId=? AND runId=? AND sourceKey=? AND hash=?').get(appId,runId,sourceKey,hash);
+    return row ? this.artifacts.get({ appId, id: row.id as Artifact['id'] }) : undefined;
+  }
+  /** Internal backup/recycle inventory, includes soft-deleted scopes. Never deletes sources. */
+  managedFiles() {
+    return this.db.prepare(`SELECT 'attachment' kind,a.id,a.appId,a.conversationId,a.relativePath,c.status FROM attachments a JOIN conversations c ON c.id=a.conversationId
+      UNION ALL SELECT 'artifact',a.id,a.appId,a.conversationId,a.relativePath,c.status FROM artifacts a JOIN conversations c ON c.id=a.conversationId`).all();
+  }
+  fileContainers() {
+    return this.db.prepare('SELECT appId,id AS conversationId,status FROM conversations ORDER BY appId,id').all() as unknown as { appId:AppId; conversationId:ConversationId; status:string }[];
   }
   close(): void {
     if (this.closed) return;

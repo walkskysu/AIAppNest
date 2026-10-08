@@ -24,6 +24,11 @@ export function policyExtension(boundary: RunBoundary, cwd: string) {
         execute: async (callId, args, signal) => result(await execute(callId, args, signal)),
       });
     } else if (boundary.mode === 'trusted-automation') {
+      if (allowed.includes('platform_register_output')) pi.registerTool({
+        name:'platform_register_output',label:'Register output',description:'Explicitly register a completed file inside this conversation workspace. Copies a verified artifact; requires user confirmation.',
+        parameters:Type.Object({ path:Type.String({ minLength:1,maxLength:4096 }) },{ additionalProperties:false }),executionMode:'sequential',
+        execute:async (callId,args,signal) => result(await boundary.output(callId,args,signal)),
+      });
       // Override every allowed built-in with an entry wrapper; no raw built-in may remain.
       const factories = [createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createBashToolDefinition,
         createFindToolDefinition, createGrepToolDefinition, createLsToolDefinition];

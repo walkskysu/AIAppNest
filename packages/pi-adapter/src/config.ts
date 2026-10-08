@@ -96,7 +96,7 @@ export function compileSession(services: EngineServices, runtime: EngineRuntime,
   const permissions = snapshot.config.permissions;
   const tools = permissions.mode === 'chat' ? [] : permissions.mode === 'controlled-files'
     ? [...(permissions.tools.includes('read') ? ['platform_read', 'platform_list'] : []), ...(permissions.tools.includes('write') ? ['platform_write', 'platform_output'] : [])]
-    : [...(permissions.tools.includes('read') ? ['read','grep','find','ls'] : []), ...(permissions.tools.includes('write') ? ['write','edit'] : []), ...(permissions.tools.includes('shell') ? ['bash'] : [])];
+    : [...(permissions.tools.includes('read') ? ['read','grep','find','ls'] : []), ...(permissions.tools.includes('write') ? ['write','edit','platform_register_output'] : []), ...(permissions.tools.includes('shell') ? ['bash'] : [])];
   const scope = { appId, conversationId, revisionId: conversation.revisionId };
   const settingsFile = join(agent, 'settings.json');
   for (const file of [configFile, roleFile, settingsFile]) {

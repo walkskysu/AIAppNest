@@ -48,7 +48,8 @@ export class PolicyService extends EventEmitter {
   private closed = false;
   private readonly now: () => number;
   constructor(private readonly storage: Storage, private readonly revision: (appId: string, revisionId: string) => AppRevisionView,
-    private readonly options: { now?: () => number; approvalMs?: number } = {}) {
+    private readonly options: { now?: () => number; approvalMs?: number;
+      registerOutput?: (scope: Scope & { runId: string }, path: string) => string } = {}) {
     super(); this.now = options.now ?? Date.now;
     // Restart cannot resume old calls or turn persisted approvals into new authority.
     for (const raw of storage.policyRecords('approval')) {
@@ -181,12 +182,13 @@ export class PolicyService extends EventEmitter {
     const tools: string[] = snapshot.permissions.mode === 'chat' ? [] : snapshot.permissions.mode === 'controlled-files'
       ? controlled.filter(tool => snapshot.permissions.tools.includes(tool === 'platform_read' || tool === 'platform_list' ? 'read' : 'write'))
       : [...(snapshot.permissions.tools.includes('read') ? ['read', 'grep', 'find', 'ls'] : []),
-        ...(snapshot.permissions.tools.includes('write') ? ['write', 'edit'] : []), ...(snapshot.permissions.tools.includes('shell') ? ['bash'] : [])];
+        ...(snapshot.permissions.tools.includes('write') ? ['write', 'edit', 'platform_register_output'] : []), ...(snapshot.permissions.tools.includes('shell') ? ['bash'] : [])];
     return Object.freeze({ tools: Object.freeze(tools), mode: snapshot.permissions.mode,
       read: (callId: string, args: unknown, signal?: AbortSignal) => this.file(run, 'platform_read', callId, args, signal) as Promise<string>,
       list: (callId: string, args: unknown, signal?: AbortSignal) => this.file(run, 'platform_list', callId, args, signal) as Promise<string[]>,
       write: (callId: string, args: unknown, signal?: AbortSignal) => this.file(run, 'platform_write', callId, args, signal) as Promise<string>,
-      output: (callId: string, args: unknown, signal?: AbortSignal) => this.file(run, 'platform_output', callId, args, signal) as Promise<string>,
+      output: (callId: string, args: unknown, signal?: AbortSignal) => run.permissions.mode === 'trusted-automation'
+        ? this.declareOutput(run,callId,args,signal) : this.file(run, 'platform_output', callId, args, signal) as Promise<string>,
       trusted: async <T>(callId: string, tool: string, args: unknown, execute: () => Promise<T>, signal?: AbortSignal): Promise<T> => {
         const call = this.call(run, callId, tool, structuredClone(args), 'account-process', null);
         try {
@@ -227,8 +229,10 @@ export class PolicyService extends EventEmitter {
     const item: PolicyApproval = { id: randomUUID(), appId: run.appId, conversationId: run.conversationId, runId: run.runId,
       callId: call.callId, tool: call.tool, digest: call.digest, grantId: call.grantId, grantVersion: call.grantVersion,
       resource: call.resource,
-      target: call.grantId ? `${run.grants.find(g => g.id === call.grantId)?.root ?? ''} / ${String((call.args as { path?: string })?.path ?? '')}` : call.resource,
-      impact: ['platform_write','platform_output','write','edit'].includes(call.tool) ? '写入或覆盖目标内容；已执行的写入不会随停止自动回滚。' : '读取目标内容，结果可能发送给所选模型。',
+      target: call.grantId ? `${run.grants.find(g => g.id === call.grantId)?.root ?? ''} / ${String((call.args as { path?: string })?.path ?? '')}`
+        : call.tool === 'platform_register_output' ? `workspace / ${String((call.args as { path:string }).path)}` : call.resource,
+      impact: call.tool === 'platform_register_output' ? '读取此文件并复制到本次任务的托管产物目录，不移动或删除原文件。'
+        : ['platform_write','platform_output','write','edit'].includes(call.tool) ? '写入或覆盖目标内容；已执行的写入不会随停止自动回滚。' : '读取目标内容，结果可能发送给所选模型。',
       state: 'pending', createdAt: this.now(), expiresAt: this.now() + (this.options.approvalMs ?? 120000) };
     let finish!: () => void;
     const promise = new Promise<void>(resolve => { finish = resolve; });
@@ -286,9 +290,26 @@ export class PolicyService extends EventEmitter {
         this.audit(run, call, true, 'GRANTED');
         if (!write) { if (stat.size > 1024 * 1024) deny('FILE_TOO_LARGE'); return readFileSync(fd, 'utf8'); }
         ftruncateSync(fd, 0); writeFileSync(fd, (args as z.infer<typeof writeArgs>).content, 'utf8'); fsyncSync(fd);
-        return 'written';
+        // Registration failure is a tool failure; the external write is not silently called an artifact.
+        this.active(run); this.currentGrant(run,call);
+        const output = checkedTarget(grant.root,args.path,false);
+        const artifactId = this.options.registerOutput?.(run,output.path);
+        return artifactId ? `written; artifactId=${artifactId}` : 'written';
       } finally { closeSync(fd); }
     } catch (error) { this.audit(run, call, false, this.reason(error)); throw new PolicyDenied(this.reason(error)); }
+  }
+  private async declareOutput(run: RunPolicy,callId: string,input: unknown,signal?: AbortSignal): Promise<string> {
+    const args = z.strictObject({ path:z.string().min(1).max(4096) }).parse(input);
+    const call = this.call(run,callId,'platform_register_output',args,'workspace-output',null);
+    try {
+      this.active(run);
+      if (!run.permissions.tools.includes('write') || !this.options.registerOutput) deny('TOOL_DENIED');
+      const root = canonicalDirectory(this.storage.paths.conversation(id<'app'>(run.appId),id<'conversation'>(run.conversationId),'workspace'));
+      checkedTarget(root,args.path,false);
+      const approval = await this.confirm(run,call,signal); this.finalCheck(run,call,approval,signal);
+      const artifactId = this.options.registerOutput(run,checkedTarget(root,args.path,false).path);
+      this.audit(run,call,true,'DECLARED_OUTPUT'); return artifactId;
+    } catch (error) { this.audit(run,call,false,this.reason(error)); throw new PolicyDenied(this.reason(error)); }
   }
   cancel(runId: string): void {
     const run = this.runs.get(runId); if (!run || run.cancelled || this.closed) return;

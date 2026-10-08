@@ -5,6 +5,7 @@ import { join, extname } from 'node:path';
 import { channels, emptySchema, publicError, skillRequestSchema, type Result, type ServiceStatus } from '@aiappnest/contracts';
 import { ServiceManager } from './service-manager';
 import { policyScopeSchema, policyRequestSchema, trustedBoundaryNotice } from '@aiappnest/contracts';
+import { fileRequestSchema, fileScopeSchema } from '@aiappnest/contracts';
 
 declare const __DEV__: boolean;
 const origin = 'app://desktop';
@@ -50,7 +51,7 @@ if (!app.requestSingleInstanceLock()) {
       try {
         const data = await readFile(join(root, 'renderer', path.slice(1)));
         const mime: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
-        return new Response(data, { headers: { 'Content-Type': mime[extname(path)]!, 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" } });
+        return new Response(data, { headers: { 'Content-Type': mime[extname(path)]!, 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" } });
       } catch { return new Response('', { status: 404 }); }
     });
     const trusted = (event: IpcMainInvokeEvent) => !!window && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame && event.senderFrame.url === home;
@@ -75,6 +76,38 @@ if (!app.requestSingleInstanceLock()) {
     handle(channels.apps, (raw) => service!.apps(raw));
     // Identity belongs to this Main document generation; the renderer cannot supply it.
     let skillOwner = randomUUID(), choosingSkill = false;
+    let choosingFile = false;
+    ipcMain.handle(channels.selectAttachment,async (event,raw: unknown) => {
+      if (!trusted(event)) return { ok:false,error:publicError('FORBIDDEN') };
+      const parsed = fileScopeSchema.safeParse(raw);
+      if (!parsed.success) return { ok:false,error:publicError('INVALID_INPUT') };
+      if (choosingFile) return { ok:false,error:publicError('BUSY') };
+      choosingFile = true; const owner = skillOwner;
+      try {
+        const result = await dialog.showOpenDialog(window!,{ title:'导入文本附件（UTF-8，最大 256 KiB）',properties:['openFile'],filters:[{ name:'文本附件',extensions:['txt','md','csv','json','log','yaml','yml'] }] });
+        if (!trusted(event) || owner !== skillOwner) return { ok:false,error:publicError('FORBIDDEN') };
+        if (result.canceled || !result.filePaths[0]) return { ok:true,value:null };
+        const reply = await service!.files({ operation:'select',...parsed.data,owner,path:result.filePaths[0] });
+        return reply.ok ? reply.value.operation === 'select' ? { ok:true,value:reply.value.selection } : { ok:false,error:publicError('PROTOCOL_ERROR') } : reply;
+      } finally { choosingFile = false; }
+    });
+    ipcMain.handle(channels.files,async (event,raw: unknown) => {
+      if (!trusted(event)) return { ok:false,error:publicError('FORBIDDEN') };
+      const parsed = fileRequestSchema.safeParse(raw);
+      if (!parsed.success) return { ok:false,error:publicError('INVALID_INPUT') };
+      const owner = skillOwner;
+      const reply = await service!.files({ operation:'request',owner,request:parsed.data });
+      if (!reply.ok) return reply;
+      if (reply.value.operation !== 'request') return { ok:false,error:publicError('PROTOCOL_ERROR') };
+      if (parsed.data.operation === 'artifacts.open') {
+        if (!trusted(event) || owner !== skillOwner) return { ok:false,error:publicError('FORBIDDEN') };
+        const path = reply.value.openPath;
+        if (!path) return { ok:false,error:publicError('PROTOCOL_ERROR') };
+        if (parsed.data.mode === 'folder') shell.showItemInFolder(path);
+        else if (await shell.openPath(path)) return { ok:false,error:publicError('FILE_IO') };
+      }
+      return { ok:true,value:reply.value.reply };
+    });
     let choosingPolicy = false;
     // Native dialogs are the only source of external paths and explicit trust consent.
     for (const channel of [channels.selectGrant, channels.trust]) ipcMain.handle(channel, async (event, raw: unknown) => {

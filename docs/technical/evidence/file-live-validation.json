@@ -1,0 +1,11 @@
+{
+  "checkedAt": "2026-10-08T03:11:52.246Z",
+  "node": "24.19.0",
+  "pi": "0.73.1",
+  "model": "real",
+  "gate": "BLOCKED",
+  "code": "MISSING_EXPLICIT_TEST_APP",
+  "attachmentCopied": false,
+  "runSucceeded": false,
+  "artifactMatched": false
+}

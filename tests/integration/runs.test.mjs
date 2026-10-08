@@ -180,11 +180,11 @@ test('R02 production local model default quota is one while global quota remains
 });
 
 test('attachments use owned registered text and integrity checks, never renderer paths', async t => {
-  const f = await fixture(t), sourceRun = f.run(), artifactId = randomUUID(), text = 'verified attachment';
-  const directory = f.storage.paths.conversation(f.app.id, f.conversation.id, 'artifacts'); f.storage.paths.ensureDirectory(directory);
+  const f = await fixture(t), artifactId = randomUUID(), text = 'verified attachment';
+  const directory = f.storage.paths.conversation(f.app.id, f.conversation.id, 'attachments'); f.storage.paths.ensureDirectory(directory);
   const path = join(directory, artifactId); writeFileSync(path, text);
-  f.storage.artifacts.insert({ id: artifactId, appId: f.app.id, conversationId: f.conversation.id, runId: sourceRun,
-    relativePath: f.storage.paths.artifact(f.app.id, f.conversation.id, artifactId), mimeType: 'text/plain', size: Buffer.byteLength(text),
+  f.storage.attachments.insert({ id: artifactId, appId: f.app.id, conversationId: f.conversation.id, displayName:'input.txt',
+    relativePath: f.storage.paths.artifact(f.app.id, f.conversation.id, artifactId).replace('/artifacts/','/attachments/'), mimeType: 'text/plain', size: Buffer.byteLength(text),
     hash: createHash('sha256').update(text).digest('hex'), createdAt: Date.now() });
   const c = controlled(), h = harness(f, { open: c.open }), input = { ...h.input('read attachment'), attachmentIds: [artifactId] };
   const a = ok(h.scheduler.request(input)).run; await until(() => c.live.has(a.id));

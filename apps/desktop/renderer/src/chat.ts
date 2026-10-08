@@ -1,3 +1,4 @@
+import { AttachmentInput, FilePanel } from './files';
 import { defineComponent, h, nextTick, onMounted, onUnmounted, ref, type PropType } from 'vue';
 import type { AppView, AppRevisionView, ChatRequest, ConversationView, MessageView, PolicyApproval, PolicyGrant, Result, RunRequest } from '@aiappnest/contracts';
 import { RunFeed, terminal, stateNames, shouldSubmit, type RunView } from './chat-state';
@@ -12,6 +13,7 @@ export const ChatWorkspace = defineComponent({
     const query = ref(''), total = ref(0), offset = ref(0), messageTotal = ref(0), prompt = ref(''), rename = ref('');
     const feedback = ref(''), busy = ref(false), approvals = ref<PolicyApproval[]>([]), grants = ref<PolicyGrant[]>([]), revision = ref<AppRevisionView>();
     const feeds = ref(new Map<string,RunFeed>()), deletion = ref(false), retry = ref<RunView>(), composing = ref(false), input = ref<HTMLTextAreaElement>();
+    const attachmentIds = ref<string[]>([]), uploading = ref(false), inputGeneration = ref(0);
     let disposed = false, generation = 0, timer: ReturnType<typeof setTimeout> | undefined;
     let pending: Extract<RunRequest,{ operation:'submit' }> | undefined;
     const subscriptions = new Map<string,string>();
@@ -79,7 +81,7 @@ export const ChatWorkspace = defineComponent({
       if (!disposed && token === generation) timer = setTimeout(() => { void poll(token); },60);
     };
     const open = async (conversationId: string) => {
-      generation++; clearTimeout(timer); unsubscribe(); const token = generation;
+      generation++; inputGeneration.value++; attachmentIds.value = []; uploading.value = false; clearTimeout(timer); unsubscribe(); const token = generation;
       messages.value = []; runs.value = []; feeds.value = new Map(); approvals.value = []; grants.value = []; pending = undefined;
       deletion.value = false; retry.value = undefined; prompt.value = ''; revision.value = undefined;
       const reply = await chat({ operation:'history',appId:props.app.id,conversationId,limit:100,offset:0 });
@@ -94,9 +96,9 @@ export const ChatWorkspace = defineComponent({
       void poll(token); await nextTick(); input.value?.focus();
     };
     const send = async () => {
-      if (!selected.value || !prompt.value.trim()) return;
+      if (!selected.value || !prompt.value.trim() || uploading.value) return;
       // On uncertain transport keep the exact request, including its text. No automatic resend.
-      pending ??= { operation:'submit',...scope(),revisionId:selected.value.revisionId,requestId:crypto.randomUUID(),text:prompt.value,attachmentIds:[],...(retry.value ? { retryOf:retry.value.id } : {}) };
+      pending ??= { operation:'submit',...scope(),revisionId:selected.value.revisionId,requestId:crypto.randomUUID(),text:prompt.value,attachmentIds:[...attachmentIds.value],...(retry.value ? { retryOf:retry.value.id } : {}) };
       const result = await runCall(pending);
       if (result.operation !== 'submit') return;
       pending = undefined; prompt.value = ''; retry.value = undefined;
@@ -168,11 +170,12 @@ export const ChatWorkspace = defineComponent({
             })),
           ])),
           retry.value ? h('p',{ role:'alert' },'重试会创建新的执行并保留原执行关联；之前可能已发生文件写入或外部副作用。确认后点击发送。') : null,
+          h(AttachmentInput,{ key:`${selected.value.id}:${inputGeneration.value}`,appId:props.app.id,conversationId:selected.value.id,disabled:busy.value || !!pending || deletion.value,onChange:(ids:string[]) => { attachmentIds.value = ids; },onUploading:(value:boolean) => { uploading.value = value; } }),
           h('form',{ onSubmit:(e:Event) => { e.preventDefault(); if (!composing.value) void action(send); } },[
             h('textarea',{ ref:input,'aria-label':'输入任务',value:prompt.value,disabled:busy.value || !!pending || deletion.value || selected.value.status !== 'active',
               onInput:(e:Event) => { prompt.value = (e.target as HTMLTextAreaElement).value; },onCompositionstart:() => { composing.value = true; },onCompositionend:() => { composing.value = false; },
               onKeydown:(e:KeyboardEvent) => { if (shouldSubmit(e,composing.value)) { e.preventDefault(); void action(send); } } }),
-            button(pending ? '用相同请求确认提交' : '发送',send,!prompt.value.trim() || deletion.value || selected.value.status !== 'active'),
+            button(pending ? '用相同请求确认提交' : '发送',send,uploading.value || !prompt.value.trim() || deletion.value || selected.value.status !== 'active'),
             button('停止',stop,!runs.value.some(r => !terminal(r))),button('刷新历史',() => open(selected.value!.id)),
           ]),
         ] : [h('p',props.app.currentRevisionId ? '从左侧选择会话或新建对话。' : '请先在创建向导中完成模型配置、试运行和发布。')]),
@@ -180,13 +183,16 @@ export const ChatWorkspace = defineComponent({
           h('h3','应用能力'),h('p',revision.value?.snapshot.config.role ?? props.app.description),
           h('details',[h('summary','会话固定版本'),h('pre',revision.value ? `${revision.value.id}\n配置哈希 ${revision.value.configHash}` : '尚未选择会话')]),
           selected.value ? [h('h3','会话授权'),...grants.value.map(grant => h('p',`${grant.resource} · ${grant.access} · ${grant.root}`)),
+            button('授权产物目录写入',async () => {
+              unwrap(await window.desktop.policy({ operation:'grants.create',...scope(),resource:'output',access:'write',confirmation:'always' })); await open(selected.value!.id);
+            }),
             ...(['read','write'] as const).map(access => button(`授权工作区${access === 'read' ? '读取' : '写入'}`,async () => {
               unwrap(await window.desktop.policy({ operation:'grants.create',...scope(),resource:'workspace',access,confirmation:'always' })); await open(selected.value!.id);
             })),
             button('授权外部目录',async () => { const selection = unwrap(await window.desktop.selectGrantDirectory(scope())); if (selection) { unwrap(await window.desktop.policy({ operation:'grants.create',...scope(),resource:'external',token:selection.token,access:'write',confirmation:'always' })); await open(selected.value!.id); } }),
             button('确认可信自动化',async () => { unwrap(await window.desktop.selectTrustedAutomation(scope())); }),
           ] : null,
-          h('h3','附件 / 产物 / 记忆'),h('p','附件上传、产物预览和记忆管理尚未接入。试运行不会注入正式会话记忆。'),
+          selected.value ? h(FilePanel,{ key:selected.value.id,appId:props.app.id,conversationId:selected.value.id,runs:runs.value }) : null,
         ]),
       ]),
     ]);

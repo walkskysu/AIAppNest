@@ -218,6 +218,26 @@ CREATE TABLE conversation_recycle (
  FOREIGN KEY(conversationId,appId) REFERENCES conversations(id,appId)
 ) STRICT;
 CREATE INDEX chat_messages_order ON messages(appId,conversationId,createdAt,id);
+` }, { version: 8, name: 'managed-files', sql: `
+CREATE TABLE attachments (
+ id TEXT PRIMARY KEY, appId TEXT NOT NULL, conversationId TEXT NOT NULL, relativePath TEXT NOT NULL UNIQUE,
+ displayName TEXT NOT NULL, mimeType TEXT NOT NULL, size INTEGER NOT NULL CHECK(size>=0),
+ hash TEXT NOT NULL CHECK(length(hash)=64), createdAt INTEGER NOT NULL,
+ UNIQUE(id,conversationId,appId), FOREIGN KEY(conversationId,appId) REFERENCES conversations(id,appId)
+) STRICT;
+CREATE TABLE run_attachments (
+ runId TEXT NOT NULL, attachmentId TEXT NOT NULL, conversationId TEXT NOT NULL, appId TEXT NOT NULL,
+ PRIMARY KEY(runId,attachmentId),
+ FOREIGN KEY(runId,conversationId,appId) REFERENCES runs(id,conversationId,appId),
+ FOREIGN KEY(attachmentId,conversationId,appId) REFERENCES attachments(id,conversationId,appId)
+) STRICT;
+ALTER TABLE artifacts ADD COLUMN displayName TEXT NOT NULL DEFAULT '';
+ALTER TABLE artifacts ADD COLUMN sourceKey TEXT NOT NULL DEFAULT '';
+CREATE INDEX attachments_scope ON attachments(appId,conversationId,createdAt,id);
+CREATE INDEX artifact_registration ON artifacts(runId,sourceKey,hash);
+${immutable('attachments')}
+${immutable('artifacts')}
+${immutable('run_attachments')}
 ` }];
 
 export function migrate(db: DatabaseSync, steps: readonly Migration[] = migrations): void {
