@@ -87,6 +87,13 @@ export default async function platformExtension(pi: ExtensionAPI): Promise<void>
     await ctx.waitForIdle();
     if (!guard.ready()) throw new Error('EXTENSION_FAILED');
   } });
+  // Supported Pi extension API writes a metadata entry; it never becomes a user/model message.
+  pi.registerCommand('aiappnest-run-boundary', { handler: async (args,ctx) => {
+    await ctx.waitForIdle();
+    const [runId,inputHash]=args.split(' ');
+    if (!/^[0-9a-f-]{36}$/.test(runId ?? '') || !/^[0-9a-f]{64}$/.test(inputHash ?? '')) throw new Error('INVALID_BOUNDARY');
+    pi.appendEntry('aiappnest-run',{ runId,inputHash });
+  } });
   // Explicit no-execution command. Other extension commands cannot enter via public prompt.
   pi.registerCommand('aiappnest-handled', { handler: async (_args, ctx) => { ctx.ui.notify('AIAPPNEST_HANDLED_V1', 'info'); } });
   pi.on('session_shutdown', () => { alive = false; socket.destroy(); });

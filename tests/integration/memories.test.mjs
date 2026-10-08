@@ -95,11 +95,13 @@ test('M09 deletion during queued/opening/budget wait is rechecked; deletion afte
   remove(service,live);assert.match(sent[1].text,/SENT_THEN_DELETED/);assert.doesNotMatch(sent[1].text,/DELETE_WHILE_QUEUED/);finish();await h.done(b);
   assert.equal(ok(service.request({ operation:'used',appId:b.appId,conversationId:b.conversationId,runId:b.id })).memories[0].currentlyDeleted,true);
 });
-test('memory audit storage failure fails the run before any model prompt, with explicit error',async t=>{
+test('memory audit storage failure seals admission before any model prompt, with explicit unsaved state',async t=>{
   const f=await fixture(t,{ memory:enabled });save(new MemoryService(f.storage),f.app.id,'偏好 FAIL_AUDIT');let sent=false;
   f.storage.memoryLinks.insert=()=>{ throw Error('simulated disk failure'); };
   const h=scheduler(f,{ open:async()=>({ getMemoryBudget:async()=>1500,prompt:async()=>{ sent=true;throw Error(); },getMessages:async()=>[],close:async()=>{},abort:async()=>{} }) });
-  const run=h.submit('偏好'),done=await h.done(run);assert.equal(done.state,'failed');assert.equal(done.error,'MEMORY_PREPARATION_FAILED');assert.equal(sent,false);assert.deepEqual(f.storage.memoryLinks.list({ runId:run.id }),[]);
+  const run=h.submit('偏好');await until(()=>h.service.failed);assert.equal(sent,false);assert.deepEqual(f.storage.memoryLinks.list({ runId:run.id }),[]);
+  assert.notEqual(f.storage.runs.get({ appId:run.appId,id:run.id }).state,'succeeded');
+  assert.equal(ok(h.service.request({ operation:'get',appId:run.appId,conversationId:run.conversationId,runId:run.id })).storage,'unsaved');
 });
 test('M05 actual Pi budget accounts for input/history and Skill expansion; trials and disabled revisions inject nothing',async t=>{
   const f=await fixture(t,{ memory:enabled,skillBody:'Use concise answers. SKILL_BODY_MARKER' }),service=new MemoryService(f.storage),h=scheduler(f);
