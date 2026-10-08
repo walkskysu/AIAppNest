@@ -75,6 +75,14 @@ export default async function platformExtension(pi: ExtensionAPI): Promise<void>
     if (pi.getAllTools().some(tool => tool.sourceInfo.source === 'builtin')) throw new Error('BUILTIN_PRESENT');
     ctx.ui.notify('AIAPPNEST_READY_V1', 'info');
   });
+  // Host-only numeric budget probe; never exposes prompt content over notifications.
+  pi.registerCommand('aiappnest-memory-budget', { handler: async (_args, ctx) => {
+    await ctx.waitForIdle();
+    const tools = pi.getAllTools().filter(tool => pi.getActiveTools().includes(tool.name));
+    const overhead = Buffer.byteLength(ctx.getSystemPrompt()) + Buffer.byteLength(JSON.stringify(tools)) + 4096;
+    const remaining = Math.max(0,(ctx.model?.contextWindow ?? 0) - model.maxTokens - overhead);
+    ctx.ui.notify('AIAPPNEST_MEMORY_BUDGET_V1:' + remaining, 'info');
+  } });
   pi.registerCommand('aiappnest-barrier', { handler: async (_args, ctx) => {
     await ctx.waitForIdle();
     if (!guard.ready()) throw new Error('EXTENSION_FAILED');

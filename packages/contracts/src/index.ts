@@ -1,3 +1,5 @@
+import { memoryRequestSchema, memoryReplySchema, type MemoryRequest, type MemoryReply } from './memories';
+export * from './memories';
 import { chatRequestSchema, chatReplySchema, type ChatRequest, type ChatReply } from './chat';
 export * from './chat';
 import { runRequestSchema, runReplySchema, type RunRequest, type RunReply } from './runs';
@@ -60,9 +62,10 @@ export const resultSchema = <T extends z.ZodType>(value: T) => z.discriminatedUn
   z.strictObject({ ok: z.literal(true), value }),
   z.strictObject({ ok: z.literal(false), error: errorSchema }),
 ]);
-export const channels = Object.freeze({ files: 'files:request', selectAttachment: 'files:select', chat: 'chat:request', external: 'chat:external', runs: 'runs:request', status: 'foundation:status', retry: 'foundation:retry', ping: 'foundation:ping', changed: 'foundation:changed', providers: 'providers:request', apps: 'apps:request', skills: 'skills:request', selectSkill: 'skills:select', policy: 'policy:request', selectGrant: 'policy:select', trust: 'policy:trust' });
+export const channels = Object.freeze({ memories: 'memories:request', files: 'files:request', selectAttachment: 'files:select', chat: 'chat:request', external: 'chat:external', runs: 'runs:request', status: 'foundation:status', retry: 'foundation:retry', ping: 'foundation:ping', changed: 'foundation:changed', providers: 'providers:request', apps: 'apps:request', skills: 'skills:request', selectSkill: 'skills:select', policy: 'policy:request', selectGrant: 'policy:select', trust: 'policy:trust' });
 const id = z.uuid();
 export const hostInputSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind:z.literal('memories'),id,input:memoryRequestSchema }),
   z.strictObject({ kind: z.literal('files'), id, input: fileHostRequestSchema }),
   z.strictObject({ kind: z.literal('hello'), version: z.literal(SERVICE_PROTOCOL_VERSION), nonce: id }),
   z.strictObject({ kind: z.literal('ping'), id, input: pingInputSchema }),
@@ -75,6 +78,7 @@ export const hostInputSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('shutdown') }),
 ]);
 export const hostOutputSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind:z.literal('memories-response'),id,result:resultSchema(memoryReplySchema) }),
   z.strictObject({ kind: z.literal('files-response'), id, result: resultSchema(fileHostReplySchema) }),
   z.strictObject({ kind: z.literal('ready'), version: z.literal(SERVICE_PROTOCOL_VERSION), nonce: id, pid: z.number().int().positive(), nodeVersion: z.string().max(30) }),
   z.strictObject({ kind: z.literal('response'), id, result: resultSchema(pingOutputSchema) }),
@@ -89,6 +93,7 @@ export const hostOutputSchema = z.discriminatedUnion('kind', [
 export type HostInput = z.infer<typeof hostInputSchema>;
 export type HostOutput = z.infer<typeof hostOutputSchema>;
 export interface DesktopAPI {
+  memories(input: MemoryRequest): Promise<Result<MemoryReply>>;
   files(input: FileRequest): Promise<Result<FileReply>>;
   selectAttachment(scope: { appId: string; conversationId: string }): Promise<Result<FileSelection>>;
   chat(input: ChatRequest): Promise<Result<ChatReply>>;

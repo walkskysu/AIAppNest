@@ -238,6 +238,10 @@ CREATE INDEX artifact_registration ON artifacts(runId,sourceKey,hash);
 ${immutable('attachments')}
 ${immutable('artifacts')}
 ${immutable('run_attachments')}
+` }, { version: 9, name: 'manual-memory-audit', sql: `
+ALTER TABLE memories ADD COLUMN priority INTEGER NOT NULL DEFAULT 0 CHECK(priority BETWEEN 0 AND 100);
+ALTER TABLE run_memory_links ADD COLUMN position INTEGER NOT NULL DEFAULT 0 CHECK(position>=0);
+CREATE INDEX memories_latest ON memories(appId,id,version DESC);
 ` }];
 
 export function migrate(db: DatabaseSync, steps: readonly Migration[] = migrations): void {

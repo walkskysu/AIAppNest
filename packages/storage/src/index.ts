@@ -66,7 +66,7 @@ export class Storage {
     this.messages = make<Message, Key<Message,'id'|'appId'>, Key<Message,'appId'|'conversationId'>>('messages', schemas.messages, ['id','appId'], ['appId','conversationId'], 'createdAt,id');
     this.events = make<RunEvent, Key<RunEvent,'runId'|'seq'>, Key<RunEvent,'runId'>>('run_events', schemas.events, ['runId','seq'], ['runId'], 'seq', { json: ['payload'] });
     this.memories = make<Memory, Key<Memory,'id'|'appId'|'version'>, AppScope>('memories', schemas.memories, ['id','appId','version'], ['appId'], 'id,version');
-    this.memoryLinks = make<RunMemoryLink, Key<RunMemoryLink,'runId'|'memoryId'|'memoryVersion'>, Key<RunMemoryLink,'runId'>>('run_memory_links', schemas.memoryLinks, ['runId','memoryId','memoryVersion'], ['runId'], 'memoryId,memoryVersion');
+    this.memoryLinks = make<RunMemoryLink, Key<RunMemoryLink,'runId'|'memoryId'|'memoryVersion'>, Key<RunMemoryLink,'runId'>>('run_memory_links', schemas.memoryLinks, ['runId','memoryId','memoryVersion'], ['runId'], 'position,memoryId,memoryVersion');
     this.artifacts = make<Artifact, Key<Artifact,'id'|'appId'>, Key<Artifact,'appId'|'conversationId'>>('artifacts', schemas.artifacts, ['id','appId'], ['appId','conversationId'], 'createdAt,id', { validate: value => {
       if (value.relativePath !== this.paths.artifact(value.appId as AppId, value.conversationId as ConversationId, value.id as Artifact['id'])) throw new DomainError('INVALID_INPUT');
       this.paths.assertManaged(join(this.paths.root, value.relativePath as string));
@@ -386,6 +386,20 @@ export class Storage {
       return run;
     });
   }
+  latestMemory(appId: AppId, memoryId: Memory['id']): Memory {
+    this.apps.get({ id: appId });
+    const row = this.db.prepare('SELECT version FROM memories WHERE appId=? AND id=? ORDER BY version DESC LIMIT 1').get(appId,memoryId);
+    if (!row) throw new DomainError('NOT_FOUND');
+    return this.memories.get({ appId,id:memoryId,version:row.version as number });
+  }
+  listMemories(appId: AppId, type: string | undefined, limit: number, offset: number) {
+    this.apps.get({ id:appId });
+    const where = "appId=? AND status!='deleted' AND version=(SELECT max(version) FROM memories WHERE appId=m.appId AND id=m.id)" + (type ? ' AND type=?' : '');
+    const args = type ? [appId,type] : [appId];
+    const rows = this.db.prepare('SELECT id,version FROM memories m WHERE '+where+' ORDER BY updatedAt DESC,id LIMIT ? OFFSET ?').all(...args,limit,offset);
+    return { total:this.db.prepare('SELECT count(*) n FROM memories m WHERE '+where).get(...args)!.n as number,
+      memories:rows.map(row => this.memories.get({ appId,id:row.id as Memory['id'],version:row.version as number })) };
+  }
   reviseMemory(value: Memory, expectedVersion: number): Memory {
     return this.transaction(() => {
       const previous = this.memories.get({ id: value.id, appId: value.appId, version: expectedVersion });
@@ -397,7 +411,7 @@ export class Storage {
     return guard(() => {
       this.apps.get({ id: appId }); timestamp(at);
       const rows = this.db.prepare(`SELECT id,version FROM memories m WHERE appId=? AND status='active' AND (expiresAt IS NULL OR expiresAt>?)
-        AND version=(SELECT max(version) FROM memories WHERE id=m.id) ORDER BY updatedAt DESC,id LIMIT 1000`).all(appId, at);
+        AND version=(SELECT max(version) FROM memories WHERE id=m.id) ORDER BY updatedAt DESC,id`).all(appId, at);
       return rows.map(row => this.memories.get({ appId, id: row.id as Memory['id'], version: row.version as number }));
     });
   }

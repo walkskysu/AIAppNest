@@ -33,7 +33,7 @@ export function verifyRuntime(runtime: EngineRuntime): void {
 export interface CompiledSession {
   scope: EngineScope; cwd: string; agent: string; sessions: string; configFile: string; roleFile: string;
   home: string; temp: string; env: NodeJS.ProcessEnv; args: string[]; sessionFile: string | null;
-  timeoutMs: number; maxTurns: number; modelId: string; tools: string[];
+  timeoutMs: number; maxTurns: number; modelId: string; tools: string[]; skillExpansionBytes: number;
 }
 export function validateSessionPath(services: EngineServices, config: Pick<CompiledSession, 'sessions' | 'cwd'>, file: string, existing: boolean): string {
   try {
@@ -128,7 +128,8 @@ export function compileSession(services: EngineServices, runtime: EngineRuntime,
   for (const skill of skills.paths) args.push('--skill', skill);
   const config: CompiledSession = { scope, cwd, agent, sessions, configFile, roleFile, home, temp, env, args,
     sessionFile: conversation.piSessionFile, timeoutMs: snapshot.config.execution.timeoutMs,
-    maxTurns: snapshot.config.execution.maxTurns, modelId: provider.model.id, tools };
+    maxTurns: snapshot.config.execution.maxTurns, modelId: provider.model.id, tools,
+    skillExpansionBytes: skills.paths.reduce((sum,path) => sum + readFileSync(path).length + Buffer.byteLength(path)*2 + 512,0) };
   if (restore) args.push('--session', validateSessionPath(services, config, conversation.piSessionFile!, true));
   return config;
 }

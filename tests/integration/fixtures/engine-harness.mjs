@@ -11,7 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const bundle = mkdtempSync(resolve('.test-engine-bundle-'));
 await build({ entryPoints: ['tests/integration/fixtures/engine-entry.ts'], outfile: join(bundle, 'entry.mjs'), bundle: true, platform: 'node', format: 'esm', packages: 'external' });
-export const { FileService, fileLimits, ChatService, RunFeed, safeExternal, shouldSubmit, RunScheduler, Storage, AppService, SkillRegistry, ProviderService, PolicyService, PiAdapter, readEngineRuntime, JsonlDecoder } = await import(pathToFileURL(join(bundle, 'entry.mjs')));
+export const { MemoryService, estimateTokens, keywords, memoryText, memoryHash, FileService, fileLimits, ChatService, RunFeed, safeExternal, shouldSubmit, RunScheduler, Storage, AppService, SkillRegistry, ProviderService, PolicyService, PiAdapter, readEngineRuntime, JsonlDecoder } = await import(pathToFileURL(join(bundle, 'entry.mjs')));
 after(() => rmSync(bundle, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 export const runtime = readEngineRuntime(resolve('dist'));
 export const ok = result => { assert.equal(result.ok, true, JSON.stringify(result)); return result.value; };
@@ -28,7 +28,7 @@ export async function fixture(t, options = {}) {
     if (text === 'model-error') { response.writeHead(500); response.end('fixture failure'); return; }
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     const send = (delta, finish_reason = null, usage) => response.write('data: ' + JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture', choices: [{ index: 0, delta, finish_reason }], ...(usage ? { usage } : {}) }) + '\n\n');
-    if (options.fileFlow && last.role === 'user') {
+    if (options.fileFlow && last.role === 'user' && text.includes('<attachment ')) {
       const match = text.match(/<attachment id="[^"]+">\n([\s\S]*?)\n<\/attachment>/);
       assert.ok(match, 'model fixture received managed input');
       const grant = JSON.parse(text.slice(0,text.indexOf('\n'))).grantId;
@@ -61,7 +61,7 @@ export async function fixture(t, options = {}) {
   const apps = new AppService(storage, providers), metadata = { name: 'Engine fixture', description: '', icon: 'book', category: '', favorite: false };
   let app = ok(apps.request({ operation: 'create', metadata })).app;
   app = ok(apps.request({ operation: 'update', appId: app.id, expectedVersion: app.version, metadata,
-    draft: { ...app.draft, role: options.role ?? 'Original role', permissions: options.permissions ?? { mode: 'chat', tools: [] },
+    draft: { ...app.draft, memory:options.memory ?? app.draft.memory, role: options.role ?? 'Original role', permissions: options.permissions ?? { mode: 'chat', tools: [] },
       model: { providerProfileId: profile.id, expectedRevision: profile.revision, temperature: 0, maxOutputTokens: 1024 } } })).app;
   if (options.skillBody) {
     const registry = new SkillRegistry(storage), source = join(root, 'skill-source'), owner = randomUUID(); mkdirSync(source);

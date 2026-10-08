@@ -144,7 +144,7 @@ test('S08 all non-null memory sources must exist and agree on ownership', t => {
 
 test('S09 memory versions and injection history retained; deletion/expiry/app filtering apply to future retrieval', t => {
   const { storage, raw } = fixture(t); const a = seed(storage), b = seed(storage);
-  const link = { runId: a.run.id, appId: a.app.id, memoryId: a.memory.id, memoryVersion: 1, injectedTextHash: 'c'.repeat(64) };
+  const link = { runId: a.run.id, appId: a.app.id, memoryId: a.memory.id, memoryVersion: 1, position:0, injectedTextHash: 'c'.repeat(64) };
   storage.memoryLinks.insert(link);
   fails(() => storage.memoryLinks.insert({ ...link, memoryId: b.memory.id }),'OWNERSHIP_MISMATCH');
   fails(() => storage.memoryLinks.insert({ ...link, memoryVersion: 2 }),'OWNERSHIP_MISMATCH');

@@ -1,3 +1,4 @@
+import { MemoryService } from '../../../packages/memory/src/index';
 import { FileService } from './files';
 import { ChatService } from './chat';
 import { hostInputSchema, publicError, type HostOutput } from '@aiappnest/contracts';
@@ -22,6 +23,7 @@ let apps: AppService | undefined;
 let skills: SkillRegistry | undefined;
 let policy: PolicyService | undefined;
 let runs: RunScheduler | undefined;
+let memories: MemoryService | undefined;
 let chat: ChatService | undefined;
 let files: FileService | undefined;
 let closing: Promise<void> | undefined;
@@ -57,6 +59,7 @@ process.on('message', (raw: unknown) => {
       skills = new SkillRegistry(storage);
       apps = new AppService(storage, providers, undefined, skills);
       files = new FileService(storage);
+      memories = new MemoryService(storage);
       policy = new PolicyService(storage, (appId, revisionId) => apps!.readRevision(appId, revisionId), { registerOutput: (scope,path) => files!.registerOutput(scope,path).id });
       runs = new RunScheduler({ storage, apps, providers, policy, files }, readEngineRuntime(__dirname), readRunSettings(storage));
       chat = new ChatService(storage, apps, runs);
@@ -81,6 +84,8 @@ process.on('message', (raw: unknown) => {
     send({ kind: 'policy-response', id: message.id, result: policy!.request(message.input) });
   } else if (message.kind === 'files' && ready) {
     void files!.request(message.input).then(result => send({ kind:'files-response',id:message.id,result }));
+  } else if (message.kind === 'memories' && ready) {
+    send({ kind:'memories-response',id:message.id,result:memories!.request(message.input) });
   } else if (message.kind === 'chat' && ready) {
     send({ kind: 'chat-response', id: message.id, result: chat!.request(message.input) });
   } else if (message.kind === 'runs' && ready) {

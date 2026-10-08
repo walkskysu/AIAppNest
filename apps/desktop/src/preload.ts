@@ -1,3 +1,4 @@
+import { memoryRequestSchema, memoryReplySchema } from '@aiappnest/contracts';
 import { fileRequestSchema, fileReplySchema, fileScopeSchema, fileSelectionSchema } from '@aiappnest/contracts';
 import { chatRequestSchema, chatReplySchema } from '@aiappnest/contracts';
 import { runRequestSchema, runReplySchema } from '@aiappnest/contracts';
@@ -29,6 +30,12 @@ const api: DesktopAPI = {
     if (!parsed.success) return { ok:false,error:publicError('INVALID_INPUT') };
     const reply = resultSchema(fileSelectionSchema).safeParse(await ipcRenderer.invoke(channels.selectAttachment,parsed.data));
     return reply.success ? reply.data : { ok:false,error:publicError('PROTOCOL_ERROR') };
+  },
+  memories: async input => {
+    const parsed = memoryRequestSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, error: publicError('INVALID_INPUT') };
+    const reply = resultSchema(memoryReplySchema).safeParse(await ipcRenderer.invoke(channels.memories,parsed.data));
+    return reply.success ? reply.data : { ok: false, error: publicError('PROTOCOL_ERROR') };
   },
   chat: async input => {
     const parsed = chatRequestSchema.safeParse(input);
