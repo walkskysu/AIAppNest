@@ -36,6 +36,7 @@ export class PiAdapter {
   private runPromise?: Promise<EngineResult>;
   private fatal?: EngineError;
   private ready = false;
+  private memoryBudget?: number;
   private closing = false;
   private closed = false;
   private exit?: Promise<void>;
@@ -156,6 +157,7 @@ export class PiAdapter {
     if (value.type === 'extension_ui_request') {
       if (value.method === 'notify' && value.message === 'AIAPPNEST_READY_V1') this.ready = true;
       else if (value.method === 'notify' && value.message === 'AIAPPNEST_HANDLED_V1' && this.active) this.active.handled = true;
+      else if (value.method === 'notify' && typeof value.message === 'string' && /^AIAPPNEST_MEMORY_BUDGET_V1:\d+$/.test(value.message)) this.memoryBudget = Number(value.message.split(':')[1]);
       else this.unknownEvents++;
       return;
     }
@@ -231,6 +233,16 @@ export class PiAdapter {
     const data = (await this.request('get_messages')).data;
     if (!Array.isArray(data?.messages)) { this.fail(new EngineError('PROTOCOL_ERROR')); throw this.fatal; }
     return data.messages;
+  }
+  async getMemoryBudget(text: string): Promise<number> {
+    if (this.active || this.closing || this.fatal) throw new EngineError('INVALID_STATE');
+    this.memoryBudget = undefined;
+    await this.request('prompt', { message:'/aiappnest-memory-budget' });
+    if (this.memoryBudget === undefined) throw new EngineError('PROTOCOL_ERROR');
+    const history = await this.getMessages();
+    // Raw message JSON overestimates rendered history; reserve input plus framing too.
+    return Math.max(0,this.memoryBudget - Buffer.byteLength(JSON.stringify(history)) - Buffer.byteLength(text)
+      - (text.startsWith('/skill:') ? this.config.skillExpansionBytes : 0));
   }
   private checkFile(state: any): void {
     if (state?.sessionFile !== this.sessionFile) { this.fail(new EngineError('SESSION_INVALID')); throw this.fatal; }

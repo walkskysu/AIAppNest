@@ -105,6 +105,47 @@ test('C01-C10 desktop wizard/chat uses production IPC + Pi with deterministic SS
   t.diagnostic('Deterministic SSE fixture; real Electron, preload, Service Host, SQLite, Pi and Windows Worker. Not C01 live acceptance; manual visual review remains separate.');
 });
 
+test('Memory UI: confirmed save, source jump, type filter, version history, disable/delete and new-session injection', { timeout:90000 },async t => {
+  const requests=[];
+  const server=createServer(async(req,res)=>{
+    let raw='';for await(const chunk of req) raw+=chunk;const body=JSON.parse(raw);requests.push(body);
+    res.writeHead(200,{'content-type':'text/event-stream'});
+    for(const [delta,finish_reason] of [[{role:'assistant',content:'确定性记忆测试回复'},null],[{},'stop']]) res.write('data: '+JSON.stringify({id:'memory-ui',object:'chat.completion.chunk',created:1,model:'fixture',choices:[{index:0,delta,finish_reason}]})+'\n\n');
+    res.end('data: [DONE]\n\n');
+  });
+  server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>{server.close(resolve);server.closeAllConnections();}));
+  const {page}=await launch(t);await ready(page);
+  await page.evaluate(async endpoint=>{
+    const ok=r=>{if(!r.ok) throw Error(r.error.message);return r.value;};
+    const model=ok(await window.desktop.providers({operation:'save',input:{config:{name:'Memory fixture',providerType:'local-openai',endpoint,modelId:'fixture',authMode:'none',settings:{timeoutMs:10000}},credential:{action:'clear'}}})).profile;
+    const metadata={name:'记忆界面测试',description:'',icon:'book',category:'',favorite:false};
+    let app=ok(await window.desktop.apps({operation:'create',metadata})).app;
+    app=ok(await window.desktop.apps({operation:'update',appId:app.id,expectedVersion:app.version,metadata,draft:{...app.draft,role:'助手',memory:{enabled:true,automaticCandidates:false,maxItems:8,tokenBudget:1500},model:{providerProfileId:model.id,expectedRevision:model.revision,temperature:0,maxOutputTokens:1024}}})).app;
+    ok(await window.desktop.apps({operation:'publish',appId:app.id,expectedVersion:app.version}));
+  },`http://127.0.0.1:${server.address().port}/v1`);
+  await page.reload();await ready(page);await page.getByRole('button',{name:'打开应用',exact:true}).click();await page.getByRole('button',{name:'新建对话',exact:true}).click();
+  await page.getByLabel('输入任务',{exact:true}).fill('中文偏好 UI_MEMORY_ORIGINAL');await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByText('确定性记忆测试回复',{exact:true}).waitFor();await page.getByRole('button',{name:'记住这条',exact:true}).first().click();
+  assert.equal(await page.getByLabel('记忆内容',{exact:true}).inputValue(),'中文偏好 UI_MEMORY_ORIGINAL');
+  await page.getByLabel('记忆内容',{exact:true}).fill('中文偏好 UI_MEMORY_CONFIRMED');await page.getByRole('button',{name:'确认保存记忆',exact:true}).click();
+  await page.getByTestId('memory-feedback').filter({hasText:'记忆已保存'}).waitFor();
+  const memoryPage=page.getByLabel('应用记忆管理',{exact:true});
+  await page.getByLabel('按类型筛选',{exact:true}).selectOption('term');await until(async()=>await memoryPage.getByRole('button',{name:'编辑',exact:true}).count()===0);
+  await page.getByLabel('按类型筛选',{exact:true}).selectOption('preference');await page.getByRole('button',{name:'跳转来源',exact:true}).click();
+  await page.getByText('中文偏好 UI_MEMORY_ORIGINAL',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'管理应用记忆',exact:true}).click();await page.getByRole('button',{name:'从新会话开始',exact:true}).click();
+  await page.getByLabel('输入任务',{exact:true}).fill('请使用中文偏好');await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByText('确定性记忆测试回复',{exact:true}).waitFor();assert.match(JSON.stringify(requests.at(-1)),/UI_MEMORY_CONFIRMED/);assert.doesNotMatch(JSON.stringify(requests.at(-1)),/UI_MEMORY_ORIGINAL/);
+  const used=page.getByLabel('本轮使用记忆',{exact:true});await used.getByText('偏好 · v1',{exact:true}).click();await used.getByText('中文偏好 UI_MEMORY_CONFIRMED',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'管理应用记忆',exact:true}).click();await memoryPage.getByRole('button',{name:'编辑',exact:true}).click();await page.getByLabel('记忆内容',{exact:true}).fill('中文偏好 UI_MEMORY_V2');await page.getByRole('button',{name:'确认保存记忆',exact:true}).click();await page.getByTestId('memory-feedback').filter({hasText:'记忆已保存'}).waitFor();
+  await page.getByRole('button',{name:'返回聊天',exact:true}).click();await used.getByText('偏好 · v1',{exact:true}).click();await used.getByText('中文偏好 UI_MEMORY_CONFIRMED',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'管理应用记忆',exact:true}).click();await page.getByRole('button',{name:'停用',exact:true}).click();await page.getByText(/v3 · disabled/).waitFor();
+  await page.getByRole('button',{name:'删除',exact:true}).click();await page.getByRole('button',{name:'确认删除记忆',exact:true}).click();await page.getByTestId('memory-feedback').filter({hasText:'已删除'}).waitFor();
+  await page.getByRole('button',{name:'从新会话开始',exact:true}).click();await page.getByLabel('输入任务',{exact:true}).fill('请使用中文偏好');await page.getByRole('button',{name:'发送',exact:true}).click();await page.getByText('确定性记忆测试回复',{exact:true}).waitFor();
+  assert.doesNotMatch(JSON.stringify(requests.at(-1)),/UI_MEMORY_|reference-memories/);
+  t.diagnostic('Deterministic model; real Electron IPC, MemoryService, SQLite, Pi and Windows. Not real-model M01/M10 acceptance.');
+});
+
 test('File F01/F02/F03/F07/F10 desktop attachment selection, removal, import failure and inert artifact preview through real IPC/Pi', { timeout:60000 },async t => {
   const { app,page,profile } = await launch(t); await ready(page);
   const malicious = '<script>window.PWNED=1</script><img src="https://invalid.example/pixel" onerror="alert(1)">';
@@ -372,7 +413,7 @@ test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload 
   const initial = await page.evaluate(() => window.desktop.getStatus());
   const pid = initial.value.pid;
   const surface = await page.evaluate(() => ({ keys: Object.keys(window.desktop).sort(), require: typeof window.require, process: typeof window.process, ipc: typeof window.ipcRenderer }));
-  assert.deepEqual(surface, { keys: ['apps', 'chat', 'files', 'getStatus', 'onStatusChanged', 'openExternal', 'ping', 'policy', 'providers', 'retryService', 'runs', 'selectAttachment', 'selectGrantDirectory', 'selectSkillDirectory', 'selectTrustedAutomation', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
+  assert.deepEqual(surface, { keys: ['apps', 'chat', 'files', 'getStatus', 'memories', 'onStatusChanged', 'openExternal', 'ping', 'policy', 'providers', 'retryService', 'runs', 'selectAttachment', 'selectGrantDirectory', 'selectSkillDirectory', 'selectTrustedAutomation', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
   const prefs = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences());
   for (const key of ['sandbox', 'contextIsolation', 'webSecurity']) assert.equal(prefs[key], true);
   for (const key of ['nodeIntegration', 'nodeIntegrationInWorker', 'nodeIntegrationInSubFrames', 'webviewTag', 'allowRunningInsecureContent']) assert.equal(prefs[key], false, key);

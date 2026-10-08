@@ -1,0 +1,41 @@
+{
+  "checkedOn": "2026-10-08",
+  "platform": "win32-x64",
+  "node": "24.19.0",
+  "pi": "0.73.1",
+  "refs": "#16",
+  "model": "deterministic-http-sse-fixture",
+  "storage": "real SQLite FULL/WAL",
+  "runtime": "real Pi and Windows Worker",
+  "typecheck": "PASS",
+  "build": "PASS",
+  "initialMemoryAndStorage": { "pass": 23, "fail": 0 },
+  "finalMemoryFlow": { "pass": 7, "fail": 0 },
+  "additionalProductionMemoryIPC": { "pass": 1, "fail": 0 },
+  "actualPayloadChecked": true,
+  "crossAppPayloadIsolation": true,
+  "rawUserMessagePreserved": true,
+  "immutableVersionAudit": true,
+  "deletionRaceChecked": true,
+  "auditFailureBlocksPrompt": true,
+  "fixtureFullFileMemoryFlow": true,
+  "initialRestrictedShellFullSuite": {
+    "tests": 190,
+    "pass": 176,
+    "fail": 13,
+    "skip": 1,
+    "failureCategories": { "electronSandboxAcl": 11, "currentUserDpapi": 2 },
+    "skipCategory": "currentUserDpapiPrerequisite"
+  },
+  "hostFullSuite": "See draft PR validation; host runs npm.cmd test before publication",
+  "realModelAcceptance": "NOT_RUN",
+  "realModelReason": "MISSING_EXPLICIT_TEST_APP",
+  "manualAcceptance": "PENDING",
+  "pending": [
+    "Engine E01/E05/E06/E09 real model",
+    "Chat C01 real-model UI flow and C01-C10 manual acceptance",
+    "File real-model attachment/artifact flow and F01-F10 final acceptance",
+    "Memory M01-M10 real-model and manual acceptance"
+  ],
+  "publication": "Draft; Refs #16; no merge or issue closure"
+}

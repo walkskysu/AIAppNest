@@ -1,3 +1,4 @@
+import { MemoryManager, UsedMemories } from './memories';
 import { AttachmentInput, FilePanel } from './files';
 import { defineComponent, h, nextTick, onMounted, onUnmounted, ref, type PropType } from 'vue';
 import type { AppView, AppRevisionView, ChatRequest, ConversationView, MessageView, PolicyApproval, PolicyGrant, Result, RunRequest } from '@aiappnest/contracts';
@@ -13,6 +14,7 @@ export const ChatWorkspace = defineComponent({
     const query = ref(''), total = ref(0), offset = ref(0), messageTotal = ref(0), prompt = ref(''), rename = ref('');
     const feedback = ref(''), busy = ref(false), approvals = ref<PolicyApproval[]>([]), grants = ref<PolicyGrant[]>([]), revision = ref<AppRevisionView>();
     const feeds = ref(new Map<string,RunFeed>()), deletion = ref(false), retry = ref<RunView>(), composing = ref(false), input = ref<HTMLTextAreaElement>();
+    const memoryPage = ref(false), memorySource = ref<MessageView>(), memoryRunId = ref('');
     const attachmentIds = ref<string[]>([]), uploading = ref(false), inputGeneration = ref(0);
     let disposed = false, generation = 0, timer: ReturnType<typeof setTimeout> | undefined;
     let pending: Extract<RunRequest,{ operation:'submit' }> | undefined;
@@ -82,7 +84,7 @@ export const ChatWorkspace = defineComponent({
     };
     const open = async (conversationId: string) => {
       generation++; inputGeneration.value++; attachmentIds.value = []; uploading.value = false; clearTimeout(timer); unsubscribe(); const token = generation;
-      messages.value = []; runs.value = []; feeds.value = new Map(); approvals.value = []; grants.value = []; pending = undefined;
+      messages.value = []; runs.value = []; memoryRunId.value = ''; feeds.value = new Map(); approvals.value = []; grants.value = []; pending = undefined;
       deletion.value = false; retry.value = undefined; prompt.value = ''; revision.value = undefined;
       const reply = await chat({ operation:'history',appId:props.app.id,conversationId,limit:100,offset:0 });
       if (disposed || token !== generation || reply.operation !== 'history') return;
@@ -94,6 +96,15 @@ export const ChatWorkspace = defineComponent({
       if (disposed || token !== generation) return;
       if (policy.operation === 'grants.list') grants.value = policy.grants.filter(g => !g.revoked);
       void poll(token); await nextTick(); input.value?.focus();
+    };
+    const newConversation = async () => {
+      const result = await chat({ operation:'create',appId:props.app.id,conversationId:crypto.randomUUID(),title:'新对话' });
+      if (result.operation === 'create') { memoryPage.value=false;await list();await open(result.conversation.id); }
+    };
+    const openSource = async (conversationId:string,messageId:string) => {
+      memoryPage.value=false;await open(conversationId);
+      while (!messages.value.some(m=>m.id===messageId) && messages.value.length<messageTotal.value) await loadHistory();
+      await nextTick();document.getElementById('message-'+messageId)?.scrollIntoView();
     };
     const send = async () => {
       if (!selected.value || !prompt.value.trim() || uploading.value) return;
@@ -115,9 +126,10 @@ export const ChatWorkspace = defineComponent({
     const button = (label: string, fn: () => Promise<void>, disabled = false) => h('button',{ type:'button',class:'secondary',disabled:busy.value || !props.ready || disabled,onClick:() => action(fn) },label);
     onMounted(() => { void action(async () => { if (props.trialConversation) await open(props.trialConversation); else await list(); }); });
     onUnmounted(() => { disposed = true; generation++; clearTimeout(timer); unsubscribe(); });
-    return () => h('section',{ class:'chat-workspace','data-testid':'app-space' },[
+    return () => memoryPage.value ? h(MemoryManager,{ appId:props.app.id,source:memorySource.value,onClose:()=>{ memoryPage.value=false; },onSource:(c:string,m:string)=>action(()=>openSource(c,m)),onNewConversation:()=>action(newConversation) }) : h('section',{ class:'chat-workspace','data-testid':'app-space' },[
       h('header',[h('h2',props.app.name),h('span',revision.value ? `模型：${revision.value.snapshot.provider.modelId} · 固定版本 ${revision.value.revision}` : '选择或新建会话'),
-        button('返回应用首页',async () => { emit('back'); }),button('应用设置',async () => { emit('settings'); })]),
+        button('返回应用首页',async () => { emit('back'); }),button('应用设置',async () => { emit('settings'); }),
+        !props.trialConversation ? button('管理应用记忆',async()=>{ memorySource.value=undefined;memoryPage.value=true; }) : null]),
       h('p',{ role:'status','data-testid':'chat-feedback' },feedback.value),
       h('div',{ class:'chat-columns' },[
         h('aside',{ class:'chat-sidebar' },[
@@ -144,13 +156,15 @@ export const ChatWorkspace = defineComponent({
           ]) : null,
           h('div',{ class:'chat-history','aria-label':'聊天历史' },[
             !messages.value.length ? h('p',revision.value?.snapshot.config.openingMessage || '输入第一条任务。打开此页面不会启动模型。') : null,
-            ...messages.value.map(message => h('article',{ class:`message ${message.role}`,key:message.id },[
+            ...messages.value.map(message => h('article',{ class:`message ${message.role}`,key:message.id,id:'message-'+message.id },[
+              !props.trialConversation && message.status==='complete' && ['user','assistant'].includes(message.role) ? button('记住这条',async()=>{ memorySource.value=message;memoryPage.value=true; }) : null,
               h('strong',{ user:'你',assistant:'助手',tool:'工具结果',system:'系统' }[message.role]),
               message.role === 'tool' ? h('details',[h('summary','查看工具结果'),h(SafeContent,{ text:message.content })]) : h(SafeContent,{ text:message.content }),
             ])),
             button('加载更多历史',() => loadHistory(),messages.value.length >= messageTotal.value),
             ...runs.value.map(run => h('section',{ class:'run-card',key:run.id },[
               h('p',{ role:'status' },stateNames[run.state]),
+              run.error === 'MEMORY_PREPARATION_FAILED' ? h('p',{ role:'alert' },'记忆检索、预算或审计保存失败，本轮未发送模型请求。请检查存储与服务状态后手动重试。') : null,
               run.state === 'failed' ? h('p','模型或工具执行失败。请检查模型连接、依赖和会话授权；确认副作用后可手动重试。') : null,
               run.state === 'interrupted' ? h('p','执行已中断。历史已保留，请检查服务状态并手动决定是否重试。') : null,
               !messages.value.some(m => m.runId === run.id && m.role === 'assistant') && feeds.value.get(run.id)?.text ? h(SafeContent,{ text:feeds.value.get(run.id)!.text }) : null,
@@ -191,6 +205,9 @@ export const ChatWorkspace = defineComponent({
             })),
             button('授权外部目录',async () => { const selection = unwrap(await window.desktop.selectGrantDirectory(scope())); if (selection) { unwrap(await window.desktop.policy({ operation:'grants.create',...scope(),resource:'external',token:selection.token,access:'write',confirmation:'always' })); await open(selected.value!.id); } }),
             button('确认可信自动化',async () => { unwrap(await window.desktop.selectTrustedAutomation(scope())); }),
+          ] : null,
+          runs.value.length ? [h('label',['查看执行的参考记忆',h('select',{ 'aria-label':'查看执行的参考记忆',value:memoryRunId.value || runs.value.at(-1)?.id,onChange:(e:Event)=>{ memoryRunId.value=(e.target as HTMLSelectElement).value; } },runs.value.map(run=>h('option',{ value:run.id },`${new Date(run.createdAt).toLocaleString()} · ${run.id.slice(0,8)}`)))]),
+            ...runs.value.filter(run=>run.id===(memoryRunId.value || runs.value.at(-1)?.id)).map(run=>h(UsedMemories,{ key:run.id,appId:run.appId,conversationId:run.conversationId,runId:run.id,state:run.state })),
           ] : null,
           selected.value ? h(FilePanel,{ key:selected.value.id,appId:props.app.id,conversationId:selected.value.id,runs:runs.value }) : null,
         ]),

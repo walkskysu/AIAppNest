@@ -1,3 +1,4 @@
+import { MemoryService } from '../../../packages/memory/src/index';
 import { FileService, FileError } from './files';
 import { createHash, randomUUID } from 'node:crypto';
 import { sep } from 'node:path';
@@ -15,13 +16,12 @@ export interface Worker {
   abort(timeoutMs?: number): Promise<unknown>;
   close(force?: boolean): Promise<void>;
   getMessages(): Promise<readonly unknown[]>;
+  getMemoryBudget?(text: string): Promise<number>;
 }
 export interface RunPlan { model: string; local: boolean; roots: string[]; exclusive: boolean; text: string; snapshot: Record<string, unknown>; workerKey?: string }
 export interface SchedulerOptions {
   concurrency?: number; localConcurrency?: number; modelLimits?: Record<string, number>; queueLimit?: number;
   queueTimeoutMs?: number; idleTtlMs?: number; abortMs?: number;
-  /** Trusted host hook. Never exposed over renderer IPC. */
-  memory?: (input: Submit) => string;
   prepare?: (input: Submit) => RunPlan;
   open?: (run: Run, signal: AbortSignal, onEvent: (event: EngineEvent) => void) => Promise<Worker>;
 }
@@ -131,15 +131,13 @@ export class RunScheduler {
     const roots = snapshot.config.permissions.tools.includes('write') ? grants.map(g => canonicalDirectory(g.root)) : [];
     let text = input.text + (this.services.files ?? new FileService(this.storage)).attachmentText(input,input.attachmentIds);
     if (availableGrants.length) text += `\n<file-capabilities>Use relative paths with these host-verified grants. Completed writes are registered as artifacts.\n${JSON.stringify(availableGrants.map(g => ({ grantId:g.id,resource:g.resource,access:g.access })))}\n</file-capabilities>`;
-    const memory = this.storage.trialForConversation(id<'app'>(input.appId),id<'conversation'>(input.conversationId)) ? '' : this.options.memory?.(input) ?? '';
-    if (memory) text += `\n${memory}`;
     if (Buffer.byteLength(text) > 1024 * 1024) throw new DomainError('INVALID_INPUT');
     return { model: hash([snapshot.provider.endpoint, snapshot.provider.modelId]), local: snapshot.provider.providerType === 'local-openai',
       roots: [...new Set(roots.map(root => process.platform === 'win32' ? root.toLowerCase() : root))].sort(),
       exclusive: snapshot.config.permissions.mode === 'trusted-automation', text, workerKey: hash([snapshot, credentials]),
       snapshot: { revisionId: input.revisionId, configHash: hash(snapshot), permissions: snapshot.config.permissions,
         grants: grants.map(g => ({ id: g.id, version: g.version, root: g.root })), model: hash([snapshot.provider.endpoint, snapshot.provider.modelId]),
-        credentialBinding: snapshot.credentialBinding, attachmentIds: input.attachmentIds, memoryHash: hash(memory) } };
+        credentialBinding: snapshot.credentialBinding, attachmentIds: input.attachmentIds } };
   }
   private submit(input: Submit): RunReply {
     const appId = id<'app'>(input.appId), conversationId = id<'conversation'>(input.conversationId);
@@ -200,7 +198,7 @@ export class RunScheduler {
         || active.some(j => conflict(j, job)) || earlier.some(j => conflict(j, job))
         || this.workers.get(job.run.conversationId)?.retiring) { earlier.push(job); continue; }
       // Refresh authority before taking locks; it may have changed during queue wait.
-      try { const refreshed = (this.options.prepare ?? this.prepare.bind(this))(job.input); job.plan = { ...refreshed,text:job.plan.text }; }
+      try { const refreshed = (this.options.prepare ?? this.prepare.bind(this))(job.input); job.plan = refreshed; }
       catch { this.queue.splice(this.queue.indexOf(job), 1); this.finish(job.run, 'cancelled', 'CONFIGURATION_UNAVAILABLE'); continue; }
       if (active.some(j => conflict(j, job)) || earlier.some(j => conflict(j, job))) { earlier.push(job); continue; }
       this.queue.splice(this.queue.indexOf(job), 1);
@@ -254,7 +252,18 @@ export class RunScheduler {
       }
       if (job.controller.signal.aborted) { await job.worker.close(true); this.finish(job.run, 'cancelled'); return; }
       this.storage.appendEvent(job.run.appId, job.run.id, 'worker.ready', {});
-      const result = await job.worker.prompt(job.run.id, job.plan.text);
+      let memory = '';
+      try {
+        const { snapshot } = this.services.apps.readRevision(job.run.appId,job.input.revisionId);
+        if (snapshot.config.memory.enabled && !this.storage.trialForConversation(job.run.appId,job.run.conversationId) && job.input.text !== '/aiappnest-handled') {
+          if (!job.worker.getMemoryBudget) throw new Error('MEMORY_BUDGET_UNAVAILABLE');
+          const remaining = await job.worker.getMemoryBudget(job.plan.text);
+          if (job.controller.signal.aborted) { await job.worker.close(true); this.finish(job.run,'cancelled'); return; }
+          memory = new MemoryService(this.storage).inject(job.run,job.input.text,snapshot.config.memory,remaining);
+        }
+      } catch { throw new Error('MEMORY_PREPARATION_FAILED'); }
+      // No await between final memory validation/audit and dispatch. Later deletion cannot retract sent context.
+      const result = await job.worker.prompt(job.run.id, job.plan.text + (memory && /^\/skill:[\w-]+$/.test(job.plan.text) ? ' ' : '') + memory);
       if (job.cancel) {
         const evidence = await job.cancel;
         if (evidence && typeof evidence === 'object') result.cancellation = { ...result.cancellation, ...evidence };
@@ -283,7 +292,7 @@ export class RunScheduler {
         await job.worker?.close(true);
         const current = this.getRun(job.run.appId, key, job.run.id);
         this.finish(job.run, job.controller.signal.aborted ? 'cancelled' : current.state === 'starting' ? 'failed' : 'interrupted',
-          error instanceof EngineError ? error.code : 'WORKER_FAILED');
+          error instanceof EngineError ? error.code : error instanceof Error && error.message === 'MEMORY_PREPARATION_FAILED' ? 'MEMORY_PREPARATION_FAILED' : 'WORKER_FAILED');
       } catch { this.storageFailure(); }
     } finally {
       this.services.policy.release(job.run.id);

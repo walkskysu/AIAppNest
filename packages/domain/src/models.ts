@@ -57,11 +57,11 @@ export interface RunEvent { runId: RunId; seq: number; type: string; payload: un
 /** Each row is an immutable version. A new version supersedes the previous one. */
 export interface Memory {
   id: MemoryId; appId: AppId; version: number; type: 'preference' | 'fact' | 'convention' | 'term';
-  content: string; status: MemoryStatus; confidence: number | null;
+  content: string; priority?: number; status: MemoryStatus; confidence: number | null;
   sourceConversationId: ConversationId | null; sourceRunId: RunId | null; sourceMessageId: MessageId | null;
   createdAt: Timestamp; updatedAt: Timestamp; expiresAt: Timestamp | null;
 }
-export interface RunMemoryLink { runId: RunId; appId: AppId; memoryId: MemoryId; memoryVersion: number; injectedTextHash: string }
+export interface RunMemoryLink { runId: RunId; appId: AppId; memoryId: MemoryId; memoryVersion: number; injectedTextHash: string; position?: number }
 export interface Attachment {
   id: Id<'attachment'>; appId: AppId; conversationId: ConversationId;
   relativePath: string; displayName: string; mimeType: string; size: number; hash: string; createdAt: Timestamp;

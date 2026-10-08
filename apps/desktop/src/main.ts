@@ -62,6 +62,7 @@ if (!app.requestSingleInstanceLock()) {
     handle(channels.retry, (raw) => emptySchema.safeParse(raw).success ? service!.start() : { ok: false, error: publicError('INVALID_INPUT') });
     handle(channels.ping, (raw) => service!.ping(raw));
     handle(channels.providers, (raw) => service!.providers(raw));
+    handle(channels.memories, raw => service!.memories(raw));
     handle(channels.chat, raw => service!.chat(raw));
     handle(channels.external, async raw => {
       if (typeof raw !== 'string' || raw.length > 4096) return { ok: false, error: publicError('INVALID_INPUT') };
