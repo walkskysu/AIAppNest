@@ -1,3 +1,4 @@
+import { activeTimeout } from '../../../packages/domain/src/active-time';
 import { memoryRequestSchema, type MemoryRequest, type MemoryReply } from '@aiappnest/contracts';
 import { fileHostRequestSchema, type FileHostRequest, type FileHostReply } from '@aiappnest/contracts';
 import { chatRequestSchema, type ChatRequest, type ChatReply } from '@aiappnest/contracts';
@@ -72,7 +73,7 @@ export class ServiceManager extends EventEmitter {
     this.starting = promise;
     this.transition('starting');
     this.nonce = randomUUID();
-    this.startTimer = setTimeout(() => this.fail('START_TIMEOUT'), this.options.startupMs ?? 5000);
+    this.startTimer = activeTimeout(() => this.fail('START_TIMEOUT'), this.options.startupMs ?? 5000);
     try {
       const forkOptions: ForkOptions & { windowsHide: boolean } = {
         execPath: this.options.nodePath, execArgv: [], env: serviceEnvironment(this.options.dataRoot),
@@ -115,7 +116,7 @@ export class ServiceManager extends EventEmitter {
     if (this.pending.size >= 64) return Promise.resolve({ ok: false, error: publicError('BUSY') });
     return new Promise((resolve) => {
       const id = randomUUID();
-      const timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 3000);
+      const timer = activeTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 3000);
       this.pending.set(id, { kind: 'response', resolve: result => resolve(result as Result<PingOutput>), timer });
       this.send({ kind: 'ping', id, input: parsed.data });
     });
@@ -127,7 +128,7 @@ export class ServiceManager extends EventEmitter {
     if (this.pending.size >= 64) return Promise.resolve({ ok: false, error: publicError('BUSY') });
     return new Promise(resolve => {
       const id = randomUUID();
-      const timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 75000);
+      const timer = activeTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 75000);
       this.pending.set(id, { kind: 'providers-response', operation: parsed.data.operation, resolve: result => resolve(result as Result<ProviderReply>), timer });
       this.send({ kind: 'providers', id, input: parsed.data });
     });
@@ -138,7 +139,7 @@ export class ServiceManager extends EventEmitter {
     if (this.status.phase !== 'ready') return Promise.resolve({ ok:false,error:publicError('NOT_READY') });
     if (this.pending.size >= 64) return Promise.resolve({ ok:false,error:publicError('BUSY') });
     return new Promise(resolve => {
-      const id = randomUUID(), timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'),this.options.requestMs ?? 30000);
+      const id = randomUUID(), timer = activeTimeout(() => this.fail('REQUEST_TIMEOUT'),this.options.requestMs ?? 30000);
       this.pending.set(id,{ kind:'files-response',operation:parsed.data.operation,resolve:r => resolve(r as Result<FileHostReply>),timer });
       this.send({ kind:'files',id,input:parsed.data });
     });
@@ -150,7 +151,7 @@ export class ServiceManager extends EventEmitter {
     if (this.pending.size >= 64) return Promise.resolve({ ok: false, error: publicError('BUSY') });
     return new Promise(resolve => {
       const id = randomUUID();
-      const timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
+      const timer = activeTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
       this.pending.set(id, { kind: 'memories-response', operation: parsed.data.operation, resolve: result => resolve(result as Result<MemoryReply>), timer });
       this.send({ kind: 'memories', id, input: parsed.data });
     });
@@ -162,7 +163,7 @@ export class ServiceManager extends EventEmitter {
     if (this.pending.size >= 64) return Promise.resolve({ ok: false, error: publicError('BUSY') });
     return new Promise(resolve => {
       const id = randomUUID();
-      const timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
+      const timer = activeTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
       this.pending.set(id, { kind: 'chat-response', operation: parsed.data.operation, resolve: result => resolve(result as Result<ChatReply>), timer });
       this.send({ kind: 'chat', id, input: parsed.data });
     });
@@ -174,7 +175,7 @@ export class ServiceManager extends EventEmitter {
     if (this.pending.size >= 64) return Promise.resolve({ ok: false, error: publicError('BUSY') });
     return new Promise(resolve => {
       const id = randomUUID();
-      const timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
+      const timer = activeTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
       this.pending.set(id, { kind: 'runs-response', operation: parsed.data.operation, resolve: result => resolve(result as Result<RunReply>), timer });
       this.send({ kind: 'runs', id, input: parsed.data });
     });
@@ -186,7 +187,7 @@ export class ServiceManager extends EventEmitter {
     if (this.pending.size >= 64) return Promise.resolve({ ok: false, error: publicError('BUSY') });
     return new Promise(resolve => {
       const id = randomUUID();
-      const timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
+      const timer = activeTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
       this.pending.set(id, { kind: 'apps-response', operation: parsed.data.operation, resolve: result => resolve(result as Result<AppReply>), timer });
       this.send({ kind: 'apps', id, input: parsed.data });
     });
@@ -197,7 +198,7 @@ export class ServiceManager extends EventEmitter {
     if (this.status.phase !== 'ready') return Promise.resolve({ ok: false, error: publicError(this.closing ? 'SHUTTING_DOWN' : 'NOT_READY') });
     if (this.pending.size >= 64) return Promise.resolve({ ok: false, error: publicError('BUSY') });
     return new Promise(resolve => {
-      const id = randomUUID(), timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
+      const id = randomUUID(), timer = activeTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
       this.pending.set(id, { kind: 'policy-response', operation: parsed.data.operation, resolve: result => resolve(result as Result<PolicyHostReply>), timer });
       this.send({ kind: 'policy', id, input: parsed.data });
     });
@@ -223,7 +224,7 @@ export class ServiceManager extends EventEmitter {
     if (this.status.phase !== 'ready') return Promise.resolve({ ok:false,error:publicError(this.closing ? 'SHUTTING_DOWN':'NOT_READY') });
     if (this.pending.size >= 64) return Promise.resolve({ ok:false,error:publicError('BUSY') });
     return new Promise(resolve => {
-      const id = randomUUID(), timer = setTimeout(() => this.fail('REQUEST_TIMEOUT'),this.options.requestMs ?? 60000);
+      const id = randomUUID(), timer = activeTimeout(() => this.fail('REQUEST_TIMEOUT'),this.options.requestMs ?? 60000);
       this.pending.set(id,{ kind:'skills-response',operation:parsed.data.operation,resolve:result => resolve(result as Result<SkillHostReply>),timer });
       this.send({ kind:'skills',id,input:parsed.data });
     });

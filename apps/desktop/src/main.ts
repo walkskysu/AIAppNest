@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, shell, ipcMain, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { channels, emptySchema, publicError, skillRequestSchema, type Result, type ServiceStatus } from '@aiappnest/contracts';
 import { ServiceManager } from './service-manager';
@@ -73,7 +73,14 @@ if (!app.requestSingleInstanceLock()) {
         return { ok: true, value: true };
       } catch { return { ok: false, error: publicError('INVALID_INPUT') }; }
     });
-    handle(channels.runs, (raw) => service!.runs(raw));
+    handle(channels.runs, async raw => {
+      const reply=await service!.runs(raw);
+      if (!reply.ok || reply.value.operation!=='diagnostics.export') return reply;
+      const result=await dialog.showSaveDialog(window!,{ title:'导出脱敏运行诊断',defaultPath:`run-${reply.value.diagnostic.runId}.json`,filters:[{ name:'JSON',extensions:['json'] }] });
+      if (result.canceled || !result.filePath) return { ok:true,value:{ ...reply.value,saved:false } };
+      try { await writeFile(result.filePath,JSON.stringify(reply.value.diagnostic,null,2)+'\n',{ mode:0o600 });return { ok:true,value:{ ...reply.value,saved:true } }; }
+      catch { return { ok:false,error:publicError('STORAGE_UNAVAILABLE') }; }
+    });
     handle(channels.apps, (raw) => service!.apps(raw));
     // Identity belongs to this Main document generation; the renderer cannot supply it.
     let skillOwner = randomUUID(), choosingSkill = false;

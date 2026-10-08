@@ -16,9 +16,19 @@ export const ChatWorkspace = defineComponent({
     const feeds = ref(new Map<string,RunFeed>()), deletion = ref(false), retry = ref<RunView>(), composing = ref(false), input = ref<HTMLTextAreaElement>();
     const memoryPage = ref(false), memorySource = ref<MessageView>(), memoryRunId = ref('');
     const attachmentIds = ref<string[]>([]), uploading = ref(false), inputGeneration = ref(0);
-    let disposed = false, generation = 0, timer: ReturnType<typeof setTimeout> | undefined;
+    let disposed = false, generation = 0, timer: ReturnType<typeof setTimeout> | undefined, reconnecting=false, failures=0;
+    const unsaved=ref(false), diagnosticText=ref(new Map<string,string>());
     let pending: Extract<RunRequest,{ operation:'submit' }> | undefined;
     const subscriptions = new Map<string,string>();
+    // Window-local, metadata-only and capped. Losing this cache simply replays durable events.
+    const cursors=new Map<string,number>();
+    try { for (const [key,value] of JSON.parse(sessionStorage.getItem('run-cursors') ?? '[]').slice(-128)) if (typeof key==='string' && Number.isSafeInteger(value) && value>=0) cursors.set(key,value); } catch { /* optional cache */ }
+    const saveCursor=(feed:RunFeed)=>{
+      cursors.delete(feed.runId);cursors.set(feed.runId,feed.seq);
+      while(cursors.size>128) cursors.delete(cursors.keys().next().value!);
+      try { sessionStorage.setItem('run-cursors',JSON.stringify([...cursors])); } catch { /* durable replay remains available */ }
+    };
+    let lastSnapshot=0;
     const scope = () => ({ appId: props.app.id, conversationId: selected.value!.id });
     const chat = async (request: ChatRequest) => unwrap(await window.desktop.chat(request));
     const runCall = async (request: RunRequest) => unwrap(await window.desktop.runs(request));
@@ -49,22 +59,34 @@ export const ChatWorkspace = defineComponent({
     const poll = async (token: number) => {
       if (disposed || token !== generation || !selected.value) return;
       try {
+        if (reconnecting || Date.now()-lastSnapshot>1500) { await loadHistory(true);lastSnapshot=Date.now();reconnecting=false; }
         for (const run of runs.value) {
+          // Terminal content is already in the snapshot. Keep buffers only for live subscriptions.
+          if (terminal(run) && !subscriptions.has(run.id)) { feeds.value.delete(run.id);continue; }
           let feed = feeds.value.get(run.id);
-          if (!feed) { feed = new RunFeed(run.id); feeds.value.set(run.id,feed); }
+          if (!feed) { feed = new RunFeed(run.id);if(cursors.has(run.id)) feed.reset(cursors.get(run.id)!);feeds.value.set(run.id,feed); }
           // Completed runs already fully replayed need no listener.
-          if (terminal(run) && feed.seq > 0 && !subscriptions.has(run.id)) continue;
+          if (terminal(run) && feed.complete && !subscriptions.has(run.id)) continue;
           const subscriptionId = subscriptions.get(run.id);
           const result = await runCall(subscriptionId ? { operation:'next',subscriptionId,afterSeq:feed.seq } : { operation:'subscribe',appId:run.appId,conversationId:run.conversationId,runId:run.id,afterSeq:feed.seq });
           if (result.operation !== 'next' && result.operation !== 'subscribe') continue;
           if (disposed || token !== generation) { await window.desktop.runs({ operation:'unsubscribe',subscriptionId:result.subscriptionId }); return; }
           subscriptions.set(run.id,result.subscriptionId); feed.merge(result.events);
+          unsaved.value=result.storage === 'unsaved';
+          if (result.resetRequired || feed.gap) {
+            feed.reset(result.snapshotSeq ?? result.afterSeq);
+            await loadHistory(true);
+            feedback.value='事件历史存在缺口，已重新读取完整展示投影；不会重发任务。可使用“修复消息投影”核对 Pi 记录。';
+          }
+          saveCursor(feed);
           const latest = await runCall({ operation:'get',appId:run.appId,conversationId:run.conversationId,runId:run.id });
           if (disposed || token !== generation) return;
           if (latest.operation === 'get') Object.assign(run,latest.run);
           if (result.terminal) {
+            feed.complete=true;feed.text='';feed.tools.clear();
             await window.desktop.runs({ operation:'unsubscribe',subscriptionId:result.subscriptionId }); subscriptions.delete(run.id);
             await loadHistory(true);
+            feeds.value.delete(run.id);
           }
         }
         const waiting = runs.value.filter(r => r.state === 'waiting_approval');
@@ -75,17 +97,18 @@ export const ChatWorkspace = defineComponent({
         }
         if (disposed || token !== generation) return;
         approvals.value = pendingApprovals;
+        failures=0;
       } catch (error) {
-        if (!disposed && token === generation) { feedback.value = `${error instanceof Error ? error.message : '连接中断'} 请点击刷新历史恢复监听。`; unsubscribe(); }
-        return;
+        if (!disposed && token === generation) { feedback.value = `${error instanceof Error ? error.message : '连接中断'} 正在重新读取服务快照并恢复监听；不会重发任务。`; unsubscribe();reconnecting=true;failures++; }
       }
       // 60ms batches; only one poll can be outstanding per page generation.
-      if (!disposed && token === generation) timer = setTimeout(() => { void poll(token); },60);
+      if (!disposed && token === generation) timer = setTimeout(() => { void poll(token); },failures ? Math.min(5000,250*2**Math.min(failures,5)):60);
     };
     const open = async (conversationId: string) => {
       generation++; inputGeneration.value++; attachmentIds.value = []; uploading.value = false; clearTimeout(timer); unsubscribe(); const token = generation;
       messages.value = []; runs.value = []; memoryRunId.value = ''; feeds.value = new Map(); approvals.value = []; grants.value = []; pending = undefined;
       deletion.value = false; retry.value = undefined; prompt.value = ''; revision.value = undefined;
+      reconnecting=false;failures=0;unsaved.value=false;diagnosticText.value.clear();
       const reply = await chat({ operation:'history',appId:props.app.id,conversationId,limit:100,offset:0 });
       if (disposed || token !== generation || reply.operation !== 'history') return;
       selected.value = reply.conversation; rename.value = reply.conversation.title; messages.value = reply.messages; runs.value = reply.runs; messageTotal.value = reply.total;
@@ -131,6 +154,7 @@ export const ChatWorkspace = defineComponent({
         button('返回应用首页',async () => { emit('back'); }),button('应用设置',async () => { emit('settings'); }),
         !props.trialConversation ? button('管理应用记忆',async()=>{ memorySource.value=undefined;memoryPage.value=true; }) : null]),
       h('p',{ role:'status','data-testid':'chat-feedback' },feedback.value),
+      unsaved.value ? h('p',{ role:'alert' },'存储失败：当前运行结果未保存，新执行已暂停。请释放磁盘空间后重启服务进行核对；不要把当前显示视为已完成。') : null,
       h('div',{ class:'chat-columns' },[
         h('aside',{ class:'chat-sidebar' },[
           props.trialConversation ? h('p','隔离试运行 · 不注入正式记忆 · 诊断保留到数据管理清理') : [
@@ -168,13 +192,19 @@ export const ChatWorkspace = defineComponent({
               run.state === 'failed' ? h('p','模型或工具执行失败。请检查模型连接、依赖和会话授权；确认副作用后可手动重试。') : null,
               run.state === 'interrupted' ? h('p','执行已中断。历史已保留，请检查服务状态并手动决定是否重试。') : null,
               !messages.value.some(m => m.runId === run.id && m.role === 'assistant') && feeds.value.get(run.id)?.text ? h(SafeContent,{ text:feeds.value.get(run.id)!.text }) : null,
+              feeds.value.get(run.id)?.truncated ? h('p','展示已截断或存在缺口；未创建独立完整输出文件。请修复消息投影核对原始会话；未写入会话的输出无法恢复。') : null,
               ...[...(feeds.value.get(run.id)?.tools.values() ?? [])].filter(tool => !tool.result || !messages.value.some(m => m.runId === run.id && m.role === 'tool')).map(tool => h('details',[h('summary',`工具：${tool.name}`),h(SafeContent,{ text:tool.result ?? '正在处理' })])),
               ['failed','interrupted','cancelled'].includes(run.state) ? button('手动重试',async () => {
                 const message = messages.value.find(m => m.runId === run.id && m.role === 'user');
                 if (!message) { feedback.value = '请先加载对应用户消息所在历史页。'; return; }
                 prompt.value = message.content; retry.value = run; pending = undefined; await nextTick(); input.value?.focus();
               }) : null,
-              h('details',[h('summary','运行诊断'),h('pre',`Run ${run.id}\n${run.error ?? ''}\n事件序号 ${feeds.value.get(run.id)?.seq ?? 0}`)]),
+              h('details',[h('summary','运行诊断'),h('pre',`Run ${run.id}\n${run.error ?? ''}\n事件序号 ${feeds.value.get(run.id)?.seq ?? 0}\n费用：未知`),
+                button('读取脱敏诊断',async()=>{ const r=await runCall({ operation:'diagnostics',appId:run.appId,conversationId:run.conversationId,runId:run.id });if(r.operation==='diagnostics') diagnosticText.value.set(run.id,JSON.stringify(r.diagnostic,null,2)); }),
+                button('导出脱敏诊断',async()=>{ const r=await runCall({ operation:'diagnostics.export',appId:run.appId,conversationId:run.conversationId,runId:run.id });if(r.operation==='diagnostics.export') feedback.value=r.saved ? '脱敏诊断已保存（不含 prompt、记忆、密钥和工具原文）。':'已取消导出。'; }),
+                diagnosticText.value.get(run.id) ? h('textarea',{ readonly:true,'aria-label':'脱敏诊断导出（可复制保存）',value:diagnosticText.value.get(run.id) }) : null,
+                button('修复消息投影',async()=>{ const r=await runCall({ operation:'repair',appId:run.appId,conversationId:run.conversationId,runId:run.id });if(r.operation==='repair') { feedback.value=`投影核对：${r.status}，补入 ${r.inserted} 条。原始会话文件未修改。`;await loadHistory(true); } },!terminal(run)),
+              ]),
             ])),
           ]),
           ...approvals.value.map(approval => h('section',{ class:'card',role:'alert' },[

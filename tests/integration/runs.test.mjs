@@ -4,7 +4,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { join } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { ServiceManager } from '../../dist/service-manager.cjs';
 import { fixture, runtime, ok, until, RunScheduler, PiAdapter } from './fixtures/engine-harness.mjs';
@@ -292,7 +292,8 @@ test('R06/R12 real Windows Job descendants exit on scheduler cancellation and sh
     const h = harness(f, { ...c, open: async (...args) => {
       const worker = await c.open(...args);
       const script = `const {spawn}=require('node:child_process');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',windowsHide:true});console.log(JSON.stringify([process.pid,c.pid]));setInterval(()=>{},1000);`;
-      const job = spawn(runtime.nativeHost, ['job', String(process.pid), runtime.node, '-e', script], { windowsHide: true, stdio: ['pipe','pipe','pipe'] });
+      const identity=execFileSync(runtime.nativeHost,['identity',String(process.pid)],{ windowsHide:true,encoding:'utf8' }).trim();
+      const job = spawn(runtime.nativeHost, ['job', String(process.pid), identity, runtime.node, '-e', script], { windowsHide: true, stdio: ['pipe','pipe','pipe'] });
       closed = new Promise(resolve => job.once('close', resolve)); let output = '';
       job.stdout.on('data', data => { output += data; if (output.includes('\n')) pids = JSON.parse(output.trim()); }); job.stderr.resume();
       worker.close = async () => { job.kill(); await closed; worker.closed = true; c.live.get(worker.current)?.('cancelled'); };

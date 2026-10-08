@@ -314,6 +314,27 @@ export class Storage {
     return this.db.prepare("SELECT id,appId FROM runs WHERE endedAt IS NULL").all()
       .map(row => this.runs.get({ appId: row.appId as AppId, id: row.id as RunId }));
   }
+  eventHead(appId: AppId, runId: RunId): number {
+    this.runs.get({ appId, id: runId });
+    return this.db.prepare('SELECT coalesce(max(seq),0) n FROM run_events WHERE runId=?').get(runId)!.n as number;
+  }
+  latestEvent(appId: AppId, runId: RunId, type: string): RunEvent | undefined {
+    this.runs.get({ appId, id: runId });
+    const row = this.db.prepare('SELECT * FROM run_events WHERE runId=? AND type=? ORDER BY seq DESC LIMIT 1').get(runId,type);
+    return row ? { ...row, payload: JSON.parse(row.payload as string) } as unknown as RunEvent : undefined;
+  }
+  /** Numeric/enum metadata only; callers must never export raw event payloads. */
+  eventCounts(appId: AppId, runId: RunId) {
+    this.runs.get({ appId, id: runId });
+    return this.db.prepare('SELECT type,count(*) n FROM run_events WHERE runId=? GROUP BY type').all(runId) as { type: string; n: number }[];
+  }
+  phaseDurations(appId: AppId, runId: RunId) {
+    const run=this.runs.get({ appId,id:runId });
+    return this.db.prepare(`WITH spans AS (
+      SELECT json_extract(payload,'$.state') state,createdAt,lead(createdAt,1,?) OVER(ORDER BY seq) nextAt
+      FROM run_events WHERE runId=? AND type IN ('run.state','run.completed'))
+      SELECT state,sum(max(0,nextAt-createdAt)) ms FROM spans GROUP BY state`).all(run.endedAt ?? Date.now(),runId) as { state:string;ms:number }[];
+  }
   eventsAfter(appId: AppId, runId: RunId, afterSeq: number, limit = 128): RunEvent[] {
     this.runs.get({ appId, id: runId });
     if (!Number.isSafeInteger(afterSeq) || afterSeq < 0 || !Number.isInteger(limit) || limit < 1 || limit > 128) throw new DomainError('INVALID_INPUT');

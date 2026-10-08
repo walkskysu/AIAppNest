@@ -1,0 +1,36 @@
+{
+  "issue": 17,
+  "reference": "Refs #17",
+  "startedAt": "2026-10-08T13:29:29.130Z",
+  "finishedAt": "2026-10-08T13:29:37.377Z",
+  "platform": "win32",
+  "node": "24.19.0",
+  "command": "npm run recovery:verify",
+  "exitCode": 0,
+  "fixtureSuite": "PASS",
+  "model": "DETERMINISTIC_HTTP_FIXTURE",
+  "cases": {
+    "X01": "fixture event replay + Electron coverage in desktop.test.mjs",
+    "X02": "fixture cursor gaps/duplicates/subscription cleanup",
+    "X03": "real Windows WorkerHost termination and creation-identity mismatch",
+    "X04": "real Service Host termination and restart; no replay",
+    "X05": "real Pi JSONL + SQLite projection deletion and repeat repair",
+    "X06": "corrupt/version-incompatible copies, byte preservation",
+    "X07": "SIMULATED_CLOCK_ONLY; ACTUAL_SLEEP_PENDING",
+    "X08": "real Pi large fixture output + bounded UI reducer",
+    "X09": "injected durable-write failure + real SQLite page quota; PHYSICAL_RESTRICTED_VOLUME_PENDING",
+    "X10": "sensitive markers excluded from allowlisted diagnostic and rotated logs",
+    "X11": "usage absent and no price configuration => unknown"
+  },
+  "pending": [
+    "Engine E01/E05/E06/E09 real model",
+    "Chat C01 real model + C01-C10 manual",
+    "File real model + F01-F10 acceptance",
+    "Memory M01-M10 real model/storage + manual",
+    "Recovery actual Windows sleep/wake",
+    "Recovery physical restricted disk volume",
+    "Recovery UI manual acceptance"
+  ],
+  "finalAcceptance": "PENDING",
+  "draftRequired": true
+}

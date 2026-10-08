@@ -1,8 +1,10 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
-import { id } from '@aiappnest/domain';
+import { id, DomainError } from '@aiappnest/domain';
+import { activeTimeout } from '../../domain/src/active-time';
+import { digest } from './session-reader';
 import type { RunBoundary } from '../../policy/src/service';
 import { compileSession, validateSessionPath, type CompiledSession, type EngineServices } from './config';
 import { JsonlDecoder } from './jsonl';
@@ -14,6 +16,7 @@ interface Active {
   id: string; boundary: RunBoundary; candidate: boolean; handled: boolean; started: boolean; assistant?: any;
   modelError: boolean; tools: Set<string>; toolErrors: number; turns: number;
   usage: { inputTokens: number; outputTokens: number }; cancellation: CancellationEvidence;
+  usageReliable: boolean; usageSeen: boolean;
 }
 export interface AdapterOptions {
   /** Interrupt launch only. Active cancellation uses abort() and its evidence. */
@@ -24,6 +27,8 @@ export interface AdapterOptions {
   onEvent?: (event: EngineEvent) => void;
 }
 const leases = new WeakMap<object, Set<string>>();
+const generation = randomUUID();
+let ownerCreated: string | undefined;
 const idle = (state: any) => state?.isStreaming === false && state?.isCompacting === false && state?.pendingMessageCount === 0;
 const cancellation = (): CancellationEvidence => ({ requested: false, acknowledged: false, idle: false, forced: false, exited: false });
 
@@ -50,6 +55,14 @@ export class PiAdapter {
   private stderrBytes = 0;
   private unknownEvents = 0;
   private sessionFile = '';
+  private clockLast=Date.now();
+  private suspended=0;
+  private wakeCheck=false;
+  private clock() {
+    const now=Date.now(),gap=now-this.clockLast;this.clockLast=now;
+    if (gap>5000) { this.suspended+=gap;this.wakeCheck=true; }
+    return now-this.suspended;
+  }
   private constructor(private readonly services: EngineServices, private readonly runtime: EngineRuntime,
     private readonly config: CompiledSession, private readonly options: AdapterOptions) {
     this.bridge = new PolicyBridge(() => this.active?.boundary, () => {
@@ -91,7 +104,9 @@ export class PiAdapter {
     await this.bridge.listen();
     if (this.closing || this.options.signal?.aborted) throw new EngineError('INVALID_STATE');
     const env = { ...this.config.env, AIAPPNEST_POLICY_PIPE: this.bridge.path, AIAPPNEST_POLICY_TOKEN: this.bridge.token };
-    this.child = spawn(this.runtime.nativeHost, ['job', String(process.pid), this.runtime.node, ...this.config.args], {
+    ownerCreated ??= execFileSync(this.runtime.nativeHost,['identity',String(process.pid)],{ windowsHide:true,encoding:'utf8',timeout:5000 }).trim();
+    if (!/^\d+$/.test(ownerCreated)) throw new EngineError('SPAWN_FAILED');
+    this.child = spawn(this.runtime.nativeHost, ['job', String(process.pid), ownerCreated, this.runtime.node, ...this.config.args], {
       cwd: this.config.cwd, env, shell: false, windowsHide: true, stdio: ['pipe','pipe','pipe'],
     });
     // Listeners precede every RPC, including the first state request and prompt.
@@ -111,12 +126,12 @@ export class PiAdapter {
       if (this.active) this.active.cancellation.exited = true;
       this.fail(new EngineError('PROCESS_EXIT', code, signal)); resolve();
     }));
-    const deadline = Date.now() + (this.options.startupMs ?? 15000);
+    const deadline = this.clock() + (this.options.startupMs ?? 15000);
     const state = (await this.request('get_state', {}, deadline, 'START_TIMEOUT')).data;
     await this.until(() => this.ready, deadline, 'START_TIMEOUT');
     if (state.model?.provider !== 'aiappnest' || state.model?.id !== this.config.modelId || !idle(state)) throw new EngineError('RESOURCE_INVALID');
     const commands = (await this.request('get_commands', {}, deadline, 'START_TIMEOUT')).data?.commands;
-    if (!Array.isArray(commands) || !commands.some(c => c.name === 'aiappnest-barrier')) throw new EngineError('EXTENSION_FAILED');
+    if (!Array.isArray(commands) || !['aiappnest-barrier','aiappnest-run-boundary','aiappnest-memory-budget'].every(name=>commands.some(c=>c.name===name))) throw new EngineError('EXTENSION_FAILED');
     const file = validateSessionPath(this.services, this.config, state.sessionFile, this.config.sessionFile !== null);
     if (this.config.sessionFile && file !== this.config.sessionFile) throw new EngineError('SESSION_INVALID');
     try { this.services.storage.attachSessionFile(id<'app'>(this.config.scope.appId), id<'conversation'>(this.config.scope.conversationId), file); }
@@ -175,10 +190,11 @@ export class PiAdapter {
           run.assistant = value.message;
           run.modelError ||= value.message.stopReason === 'error';
           const usage = value.message.usage;
-          if (usage && Number.isSafeInteger(usage.input) && Number.isSafeInteger(usage.output) && usage.input >= 0 && usage.output >= 0) {
+          if (usage && Number.isSafeInteger(usage.input) && Number.isSafeInteger(usage.output) && usage.input >= 0 && usage.output >= 0 && (usage.input>0 || usage.output>0)) {
+            run.usageSeen=true;
             run.usage.inputTokens += usage.input; run.usage.outputTokens += usage.output;
             this.emit('usage', { ...run.usage });
-          }
+          } else run.usageReliable=false; // Pi defaults missing provider usage to zero; that is not measured usage.
         }
         break;
       case 'tool_execution_start':
@@ -203,20 +219,27 @@ export class PiAdapter {
     // Diagnostic callers may have no active execute() awaiting the failure. Always retire resources.
     if (!this.closing) void this.close(true).catch(() => {});
   }
-  private request(type: string, fields: Record<string, unknown> = {}, deadline = Date.now() + (this.options.commandMs ?? 15000), timeoutCode: 'COMMAND_TIMEOUT' | 'START_TIMEOUT' = 'COMMAND_TIMEOUT'): Promise<any> {
+  private request(type: string, fields: Record<string, unknown> = {}, deadline = this.clock() + (this.options.commandMs ?? 15000), timeoutCode: 'COMMAND_TIMEOUT' | 'START_TIMEOUT' = 'COMMAND_TIMEOUT'): Promise<any> {
     if (this.fatal || this.closing) return Promise.reject(this.fatal ?? new EngineError('INVALID_STATE'));
     if (this.pending.size >= 32) return Promise.reject(new EngineError('INVALID_STATE'));
     const requestId = randomUUID();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.fail(new EngineError(timeoutCode)), Math.max(1, deadline - Date.now()));
+      const timer = activeTimeout(() => this.fail(new EngineError(timeoutCode)), Math.max(1, deadline - this.clock()),
+        () => { this.clock();this.emit('status',{ state:'wake_recheck',action:'query_only' }); });
       this.pending.set(requestId, { type, resolve, reject, timer });
       this.child!.stdin.write(JSON.stringify({ type, id: requestId, ...fields }) + '\n');
     });
   }
   private async until(predicate: () => boolean, deadline: number, code: 'RUN_TIMEOUT' | 'START_TIMEOUT' = 'RUN_TIMEOUT'): Promise<void> {
     while (!predicate()) {
+      this.clock();
+      if (this.wakeCheck) {
+        this.wakeCheck=false;
+        this.emit('status',{ state:'wake_recheck',action:'query_only' });
+        if (this.sessionFile) await this.getState();
+      }
       if (this.fatal) throw this.fatal;
-      if (Date.now() >= deadline) throw new EngineError(code);
+      if (this.clock() >= deadline) throw new EngineError(code);
       await delay(5);
     }
     if (this.fatal) throw this.fatal;
@@ -259,16 +282,21 @@ export class PiAdapter {
       const boundary = this.services.policy.bindRun(this.config.scope.appId, runId);
       if (!isDeepStrictEqual([...boundary.tools].sort(), [...this.config.tools].sort())) { boundary.cancel(); throw new EngineError('RESOURCE_INVALID'); }
       this.active = { id: runId, boundary, candidate: false, handled: false, started: false, modelError: false,
-        tools: new Set(), toolErrors: 0, turns: 0, usage: { inputTokens: 0, outputTokens: 0 }, cancellation: cancellation() };
+        tools: new Set(), toolErrors: 0, turns: 0, usage: { inputTokens: 0, outputTokens: 0 }, usageSeen:false,usageReliable:true,cancellation: cancellation() };
+      this.services.storage.appendEvent(record.appId,record.id,'worker.identity',{
+        generation,ownerPid:process.pid,ownerCreated,workerHostPid:this.child?.pid,job:'kill_on_close',launchId:this.launchId,
+      });
       this.runPromise = this.execute(text, this.active);
       return this.runPromise;
-    } catch (error) { return Promise.reject(error instanceof EngineError ? error : new EngineError('RESOURCE_INVALID')); }
+    } catch (error) { return Promise.reject(error instanceof EngineError || error instanceof DomainError && error.code==='STORAGE_UNAVAILABLE' ? error : new EngineError('RESOURCE_INVALID')); }
   }
+  private readonly launchId = randomUUID();
   private async execute(text: string, run: Active): Promise<EngineResult> {
-    const deadline = Date.now() + this.config.timeoutMs;
+    const deadline = this.clock() + this.config.timeoutMs;
     let result: EngineResult;
-    const base = () => ({ runId: run.id, toolErrors: run.toolErrors, usage: run.usage, cancellation: run.cancellation });
+    const base = () => ({ runId: run.id, toolErrors: run.toolErrors, usage: run.usageSeen && run.usageReliable ? run.usage:null, cancellation: run.cancellation });
     try {
+      await this.request('prompt',{ message:`/aiappnest-run-boundary ${run.id} ${digest(text)}` },deadline);
       await this.request('prompt', { message: text }, deadline);
       this.emit('status', { state: 'accepted' });
       await this.until(() => run.candidate || run.handled, deadline);
@@ -301,7 +329,7 @@ export class PiAdapter {
     if (!run) return cancellation();
     run.cancellation.requested = true; run.boundary.cancel();
     this.emit('status', { state: 'cancelling' });
-    const deadline = Date.now() + timeoutMs;
+    const deadline = this.clock() + timeoutMs;
     try {
       await this.request('abort', {}, deadline); run.cancellation.acknowledged = true;
       await this.until(() => !this.active, deadline);

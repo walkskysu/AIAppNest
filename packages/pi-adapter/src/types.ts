@@ -21,7 +21,7 @@ export interface CancellationEvidence { requested: boolean; acknowledged: boolea
 export interface EngineResult {
   runId: string; status: 'succeeded' | 'handled' | 'failed' | 'cancelled' | 'interrupted';
   error?: EngineErrorCode; exitCode?: number | null; signal?: string | null;
-  toolErrors: number; usage: { inputTokens: number; outputTokens: number };
+  toolErrors: number; usage: { inputTokens: number; outputTokens: number } | null;
   cancellation: CancellationEvidence;
 }
 /** Host owns these trusted build artifacts; callers cannot supply paths over renderer IPC. */

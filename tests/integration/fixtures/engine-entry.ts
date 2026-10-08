@@ -13,3 +13,8 @@ export { validateSessionPath, compileSession } from '../../../packages/pi-adapte
 export { RunScheduler } from '../../../apps/service-host/src/runs';
 export { ChatService } from '../../../apps/service-host/src/chat';
 export { RunFeed, safeExternal, shouldSubmit } from '../../../apps/desktop/renderer/src/chat-state';
+export { Recovery } from '../../../apps/service-host/src/recovery';
+export { DiagnosticLog, diagnostics } from '../../../apps/service-host/src/diagnostics';
+export { activeTimeout } from '../../../packages/domain/src/active-time';
+export { readSession, projectionId } from '../../../packages/pi-adapter/src/session-reader';
+export { DomainError } from '@aiappnest/domain';

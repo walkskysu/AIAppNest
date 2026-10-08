@@ -34,6 +34,8 @@ class WorkerHost {
     [DllImport("kernel32", SetLastError=true)] static extern uint WaitForMultipleObjects(uint count, IntPtr[] handles, bool all, uint timeout);
     [DllImport("kernel32")] static extern bool GetExitCodeProcess(IntPtr process, out uint code);
     [DllImport("kernel32")] static extern bool TerminateProcess(IntPtr process, uint code);
+    [DllImport("kernel32", SetLastError=true)] static extern bool GetProcessTimes(IntPtr process, out long created, out long exited, out long kernel, out long user);
+    static long Created(IntPtr process) { long c,e,k,u; Check(GetProcessTimes(process,out c,out e,out k,out u)); return c; }
 
     // Windows CRT quoting, including trailing backslashes and embedded quotes.
     static string Quote(string value) {
@@ -48,16 +50,22 @@ class WorkerHost {
     static int Main(string[] args) {
         IntPtr job = IntPtr.Zero, parent = IntPtr.Zero; var child = new ProcessInfo();
         try {
-            if (args.Length < 3 || args[0] != "job") return 64;
-            parent = OpenProcess(0x100000, false, int.Parse(args[1])); Check(parent != IntPtr.Zero);
+            if (args.Length == 2 && args[0] == "identity") {
+                parent = OpenProcess(0x1000, false, int.Parse(args[1])); Check(parent != IntPtr.Zero);
+                Console.WriteLine(Created(parent)); return 0;
+            }
+            if (args.Length < 4 || args[0] != "job") return 64;
+            parent = OpenProcess(0x100000 | 0x1000, false, int.Parse(args[1])); Check(parent != IntPtr.Zero);
+            // PID reuse cannot adopt a different owner. Retain this exact process handle for the Job lifetime.
+            if (Created(parent) != long.Parse(args[2])) return 127;
             job = CreateJobObject(IntPtr.Zero, null); Check(job != IntPtr.Zero);
             var limits = new Limits(); limits.Basic.Flags = 0x2000; // KILL_ON_JOB_CLOSE
             Check(SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(limits)));
             var command = new StringBuilder();
-            for (int i=2;i<args.Length;i++) { if (i>2) command.Append(' '); command.Append(Quote(args[i])); }
+            for (int i=3;i<args.Length;i++) { if (i>3) command.Append(' '); command.Append(Quote(args[i])); }
             var si = new Startup(); si.Size = Marshal.SizeOf(si); si.Flags=0x100;
             si.Input=GetStdHandle(-10); si.Output=GetStdHandle(-11); si.Error=GetStdHandle(-12);
-            Check(CreateProcess(args[2], command, IntPtr.Zero, IntPtr.Zero, true, 0x4 | 0x08000000, IntPtr.Zero, null, ref si, out child));
+            Check(CreateProcess(args[3], command, IntPtr.Zero, IntPtr.Zero, true, 0x4 | 0x08000000, IntPtr.Zero, null, ref si, out child));
             // Fail closed; unassigned child is still suspended and is terminated in finally.
             Check(AssignProcessToJobObject(job, child.Process));
             Check(ResumeThread(child.Thread) != uint.MaxValue);

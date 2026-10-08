@@ -45,7 +45,7 @@ test('C01-C10 desktop wizard/chat uses production IPC + Pi with deterministic SS
   });
   server.listen(0,'127.0.0.1'); await once(server,'listening');
   t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
-  const { page,profile } = await launch(t); await ready(page);
+  const { app,page,profile } = await launch(t); await ready(page);
   await page.getByRole('button',{ name:'创建应用',exact:true }).click();
   await page.getByLabel('应用名称',{ exact:true }).fill('完整创建聊天');
   await page.getByLabel('角色说明',{ exact:true }).fill('中文助手');
@@ -94,6 +94,23 @@ test('C01-C10 desktop wizard/chat uses production IPC + Pi with deterministic SS
   await page.getByTestId('app-card').getByRole('button',{ name:'打开应用',exact:true }).click();
   await page.getByRole('button',{ name:'新对话',exact:true }).click();
   await page.getByText(malicious,{ exact:true }).waitFor(); await wait(200); assert.equal(requests.length,beforeRefresh);
+  // X01/X02/X04: a live view reconnects after Host replacement without sending another prompt.
+  await input.fill('slow');await input.press('Enter');await page.getByText('正在执行',{ exact:true }).waitFor();
+  await until(()=>requests.length===beforeRefresh+1);
+  const servicePid=(await page.evaluate(()=>window.desktop.getStatus())).value.pid;
+  process.kill(servicePid);
+  await page.waitForFunction(()=>document.querySelector('[data-testid="phase"]')?.getAttribute('data-phase')==='failed');
+  await page.getByRole('button',{ name:'重试服务',exact:true }).click();await ready(page);
+  await page.getByText('执行中断',{ exact:true }).waitFor();await wait(200);assert.equal(requests.length,beforeRefresh+1);
+  await page.getByText('运行诊断',{ exact:true }).last().click();
+  await page.getByRole('button',{ name:'读取脱敏诊断',exact:true }).last().click();
+  const diagnostic=await page.getByLabel('脱敏诊断导出（可复制保存）').inputValue();
+  assert.equal(JSON.parse(diagnostic).cost,'unknown');assert.ok(!diagnostic.includes('slow'));
+  const exported=join(profile,'recovery-diagnostic.json');
+  await app.evaluate(({ dialog },file)=>{ dialog.showSaveDialog=async()=>({ canceled:false,filePath:file }); },exported);
+  await page.getByRole('button',{ name:'导出脱敏诊断',exact:true }).last().click();
+  await page.getByTestId('chat-feedback').filter({ hasText:'脱敏诊断已保存' }).waitFor();
+  assert.equal(JSON.parse(await (await import('node:fs/promises')).readFile(exported,'utf8')).cost,'unknown');
   await input.fill('slow'); await input.press('Enter');
   await page.getByText('正在执行',{ exact:true }).waitFor();
   await page.getByRole('button',{ name:'删除会话',exact:true }).click();

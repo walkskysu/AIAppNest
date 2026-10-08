@@ -6,7 +6,7 @@ import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { fixture, runtime, ok, until, PiAdapter, JsonlDecoder } from './fixtures/engine-harness.mjs';
@@ -122,7 +122,8 @@ test('E09 production Job Object kills owned descendants and leaves unrelated pro
   const env = { SystemRoot: process.env.SystemRoot };
   const unrelated = spawn(runtime.node, ['-e', 'setInterval(()=>{},1000)'], { env, windowsHide: true, shell: false, stdio: 'ignore' });
   const script = `const {spawn}=require('node:child_process'); const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',windowsHide:true}); console.log(JSON.stringify([process.pid,c.pid])); setInterval(()=>{},1000);`;
-  const job = spawn(runtime.nativeHost, ['job', String(process.pid), runtime.node, '-e', script], { env, windowsHide: true, shell: false });
+  const identity=execFileSync(runtime.nativeHost,['identity',String(process.pid)],{ windowsHide:true,encoding:'utf8' }).trim();
+  const job = spawn(runtime.nativeHost, ['job', String(process.pid), identity, runtime.node, '-e', script], { env, windowsHide: true, shell: false });
   const exited = new Promise(resolve => job.once('close', resolve));
   t.after(async () => { job.kill(); unrelated.kill(); await exited; });
   let output = ''; job.stdout.on('data', chunk => { output += chunk; }); job.stderr.resume();

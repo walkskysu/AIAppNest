@@ -9,6 +9,9 @@ import { PiAdapter, EngineError, type EngineEvent, type EngineResult, type Engin
 import type { EngineServices } from '../../../packages/pi-adapter/src/config';
 import type { PolicyService } from '../../../packages/policy/src/service';
 import { canonicalDirectory } from '../../../packages/policy/src/paths';
+import { Recovery } from './recovery';
+import { DiagnosticLog, diagnostics } from './diagnostics';
+import { displayText, projectionId } from '../../../packages/pi-adapter/src/session-reader';
 
 type Submit = Extract<RunRequest, { operation: 'submit' }>;
 export interface Worker {
@@ -25,7 +28,7 @@ export interface SchedulerOptions {
   prepare?: (input: Submit) => RunPlan;
   open?: (run: Run, signal: AbortSignal, onEvent: (event: EngineEvent) => void) => Promise<Worker>;
 }
-interface Job { run: Run; input: Submit; plan: RunPlan; controller: AbortController; done?: Promise<void>; worker?: Worker; cancel?: Promise<unknown> }
+interface Job { run: Run; input: Submit; plan: RunPlan; controller: AbortController; done?: Promise<void>; worker?: Worker; cancel?: Promise<unknown>; outputBytes?: number; truncated?: boolean; suspendedMs?: number }
 const terminal = (run: Run) => terminalRunStates.includes(run.state);
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const overlaps = (a: string, b: string) => a === b || a.startsWith(b.endsWith(sep) ? b : b + sep) || b.startsWith(a.endsWith(sep) ? a : a + sep);
@@ -47,6 +50,9 @@ export class RunScheduler {
   private timer: NodeJS.Timeout;
   private pumping = false;
   private retiring = new Set<string>();
+  private recovery: Recovery;
+  private log: DiagnosticLog;
+  private lastTick=Date.now();
   /** Seal new submissions before cancellation. Idle workers also exit before soft deletion. */
   retireConversation(appId: string, conversationId: string): boolean {
     this.storage.conversations.get({ appId: id<'app'>(appId), id: id<'conversation'>(conversationId) });
@@ -66,8 +72,9 @@ export class RunScheduler {
       options.queueTimeoutMs ?? 300000, options.idleTtlMs ?? 300000, options.abortMs ?? 1500, ...Object.values(options.modelLimits ?? {})]) {
       if (!Number.isSafeInteger(value) || value < 1) throw new DomainError('INVALID_INPUT');
     }
-    // Old work is NEVER re-enqueued. Full Pi/platform reconciliation belongs to reliability work.
-    for (const run of this.storage.unfinishedRuns()) this.finish(run, run.state === 'queued' ? 'cancelled' : 'interrupted', 'RECOVERY_REQUIRED');
+    this.recovery = new Recovery(this.storage);
+    this.log = new DiagnosticLog(this.storage);
+    this.recovery.reconcile();
     services.policy.on('event', this.policyEvent);
     this.timer = setInterval(() => { try { this.flush(); this.tick(); } catch { this.storageFailure(); } }, 40);
     this.timer.unref();
@@ -100,7 +107,15 @@ export class RunScheduler {
     }
     if (input.operation === 'submit') return this.submit(input);
     const run = this.getRun(input.appId, input.conversationId, input.runId);
-    if (input.operation === 'get') return { operation: input.operation, run };
+    if (input.operation === 'get') return { operation: input.operation, run,storage:this.failed ? 'unsaved':'saved' };
+    if (input.operation === 'diagnostics' || input.operation === 'diagnostics.export') return { operation:input.operation,diagnostic:diagnostics(this.storage,run,this.failed,this.log.saved) };
+    if (input.operation === 'repair') {
+      if (this.failed) throw new DomainError('STORAGE_UNAVAILABLE');
+      if (!terminal(run) || [...this.active.values()].some(j => j.run.conversationId === run.conversationId)) return { operation:'repair',status:'busy',inserted:0,confirmed:false };
+      const report = this.recovery.repair(run);
+      this.storage.appendEvent(run.appId,run.id,'recovery.repair',report);
+      return { operation:'repair',...report };
+    }
     if (input.operation === 'cancel') {
       const next = this.cancel(run);
       return { operation: input.operation, run: next, accepted: true, terminated: terminal(next) };
@@ -113,11 +128,14 @@ export class RunScheduler {
   }
   private readSubscription(operation: 'subscribe' | 'next', subscriptionId: string, afterSeq: number,
     scope: { appId: string; conversationId: string; runId: string }): RunReply {
-    this.flush();
+    if (!this.failed) this.flush();
     const run = this.getRun(scope.appId, scope.conversationId, scope.runId);
     const events = this.storage.eventsAfter(run.appId, run.id, afterSeq);
+    const snapshotSeq = this.storage.eventHead(run.appId,run.id);
+    const resetRequired = afterSeq > snapshotSeq || (events.length > 0 && events[0]!.seq !== afterSeq+1)
+      || events.some((e,i) => i > 0 && e.seq !== events[i-1]!.seq+1);
     const cursor = events.at(-1)?.seq ?? afterSeq;
-    return { operation, subscriptionId, events, afterSeq: cursor,
+    return { operation, subscriptionId, events:resetRequired ? []:events, afterSeq:resetRequired ? snapshotSeq:cursor,resetRequired,snapshotSeq,storage:this.failed ? 'unsaved':'saved',
       terminal: terminal(run) && this.storage.eventsAfter(run.appId, run.id, cursor, 1).length === 0 };
   }
   private prepare(input: Submit): RunPlan {
@@ -182,6 +200,8 @@ export class RunScheduler {
     setImmediate(() => { this.pumping = false; try { this.tick(); } catch { this.storageFailure(); } });
   }
   private tick() {
+    const now=Date.now(),gap=now-this.lastTick;this.lastTick=now;
+    if (gap>5000) for (const job of this.queue) job.suspendedMs=(job.suspendedMs ?? 0)+gap;
     for (const [key, sub] of this.subscriptions) if (sub.expires <= Date.now()) this.subscriptions.delete(key);
     for (const [key, entry] of this.workers) if (!entry.busy && !entry.retiring && Date.now() - entry.idleAt >= (this.options.idleTtlMs ?? 300000)) {
       entry.retiring = entry.worker.close().then(() => { this.workers.delete(key); this.schedule(); }, () => this.storageFailure());
@@ -189,7 +209,7 @@ export class RunScheduler {
     if (this.stopped || this.failed) return;
     const earlier: Job[] = [];
     for (const job of [...this.queue]) {
-      if (Date.now() - job.run.createdAt >= (this.options.queueTimeoutMs ?? 300000)) {
+      if (Date.now() - job.run.createdAt - (job.suspendedMs ?? 0) >= (this.options.queueTimeoutMs ?? 300000)) {
         this.queue.splice(this.queue.indexOf(job), 1); this.finish(job.run, 'cancelled', 'QUEUE_TIMEOUT'); continue;
       }
       const active = [...this.active.values()];
@@ -261,9 +281,12 @@ export class RunScheduler {
           if (job.controller.signal.aborted) { await job.worker.close(true); this.finish(job.run,'cancelled'); return; }
           memory = new MemoryService(this.storage).inject(job.run,job.input.text,snapshot.config.memory,remaining);
         }
-      } catch { throw new Error('MEMORY_PREPARATION_FAILED'); }
+      } catch (error) { if (error instanceof DomainError && error.code === 'STORAGE_UNAVAILABLE') throw error;throw new Error('MEMORY_PREPARATION_FAILED'); }
       // No await between final memory validation/audit and dispatch. Later deletion cannot retract sent context.
-      const result = await job.worker.prompt(job.run.id, job.plan.text + (memory && /^\/skill:[\w-]+$/.test(job.plan.text) ? ' ' : '') + memory);
+      const engineText = job.plan.text + (memory && /^\/skill:[\w-]+$/.test(job.plan.text) ? ' ' : '') + memory;
+      this.recovery.beforePrompt(job.run,engineText);
+      const result = await job.worker.prompt(job.run.id, engineText);
+      if (this.failed) return;
       if (job.cancel) {
         const evidence = await job.cancel;
         if (evidence && typeof evidence === 'object') result.cancellation = { ...result.cancellation, ...evidence };
@@ -285,11 +308,16 @@ export class RunScheduler {
         state = 'cancelled'; content = '';
         result.cancellation = { ...result.cancellation, requested: true, exited: true };
       }
-      this.finish(job.run, state, result.error ?? null, content, result);
+      this.flush();
+      this.recovery.witness(job.run,state,result.usage);
+      this.finish(job.run,state,result.error ?? null,content,result,true);
+      if (this.getRun(job.run.appId,key,job.run.id).error === 'SESSION_INVALID') { reusable=false;await job.worker.close(true); }
     } catch (error) {
       reusable = false;
+      if (error instanceof DomainError && error.code === 'STORAGE_UNAVAILABLE') this.storageFailure();
       try {
         await job.worker?.close(true);
+        if (this.failed) return;
         const current = this.getRun(job.run.appId, key, job.run.id);
         this.finish(job.run, job.controller.signal.aborted ? 'cancelled' : current.state === 'starting' ? 'failed' : 'interrupted',
           error instanceof EngineError ? error.code : error instanceof Error && error.message === 'MEMORY_PREPARATION_FAILED' ? 'MEMORY_PREPARATION_FAILED' : 'WORKER_FAILED');
@@ -315,8 +343,19 @@ export class RunScheduler {
         const run = this.getRun(job.run.appId, job.run.conversationId, job.run.id);
         if (run.state === 'starting') job.run = this.change(run, 'running');
       }
-      const payload = event.payload, bytes = Buffer.byteLength(JSON.stringify(payload));
-      this.pending.push({ run: job.run, type: `engine.${event.type}`, payload }); this.pendingBytes += bytes;
+      if (this.failed) return;
+      let payload = event.payload, type = `engine.${event.type}`;
+      let bytes = Buffer.byteLength(JSON.stringify(payload));
+      if (['assistant.delta','tool.result'].includes(event.type)) {
+        job.outputBytes = (job.outputBytes ?? 0) + bytes;
+        if (bytes > 64*1024 || job.outputBytes > 1024*1024) {
+          if (job.truncated) return;
+          job.truncated=true; type='engine.output.truncated';
+          payload={ source:event.type,originalBytes:bytes,retention:'session_unverified',fullOutputFile:null };
+          bytes=256;
+        }
+      }
+      this.pending.push({ run: job.run, type, payload }); this.pendingBytes += bytes;
       if (this.pending.length >= 128 || this.pendingBytes >= 256 * 1024) this.flush();
     } catch { this.storageFailure(); }
   }
@@ -337,33 +376,43 @@ export class RunScheduler {
     this.storage.transaction(() => { for (const item of this.pending) {
       this.storage.appendEvent(item.run.appId, item.run.id, item.type, item.payload);
       if (item.type === 'engine.tool.result') {
-        const payload = item.payload as { name?: string; result?: unknown; isError?: boolean };
-        this.storage.messages.insert({ id: id<'message'>(randomUUID()), appId:item.run.appId,conversationId:item.run.conversationId,
-          runId:item.run.id,role:'tool',content:`${payload.name ?? '工具'}\n${JSON.stringify(payload.result)}`,status:payload.isError ? 'failed' : 'complete',createdAt:timestamp() });
+        const payload = item.payload as { callId?: string; name?: string; result?: unknown; isError?: boolean };
+        this.storage.messages.insert({ id: id<'message'>(payload.callId ? projectionId(item.run.id,'tool:'+payload.callId):randomUUID()), appId:item.run.appId,conversationId:item.run.conversationId,
+          runId:item.run.id,role:'tool',content:displayText(`${payload.name ?? '工具'}\n${JSON.stringify(payload.result)}`),status:payload.isError ? 'failed' : 'complete',createdAt:timestamp() });
       }
     } });
     this.pending = []; this.pendingBytes = 0;
   }
-  private finish(run: Run, state: RunState, error: string | null = null, content = '', result?: EngineResult) {
+  private finish(run: Run, state: RunState, error: string | null = null, content = '', result?: EngineResult,project = false) {
+    if (this.failed) return;
     this.flush();
     this.storage.transaction(() => {
       const current = this.getRun(run.appId, run.conversationId, run.id);
       if (terminal(current)) return;
+      let output: { source:string;truncated:boolean }={ source:'unavailable',truncated:content.length>65536 };
+      if (project) {
+        const repair=this.recovery.repair(run);
+        output={ source:repair.source,truncated:repair.truncated };
+        if (repair.status === 'session_invalid' && state === 'succeeded') { state='interrupted';error='SESSION_INVALID'; }
+        if (!['no_boundary','no_session'].includes(repair.status)) content='';
+      }
       this.storage.transitionRun(run.appId, run.id, current.version, state, timestamp(), error, result?.usage ?? null);
       if (content) this.storage.messages.insert({ id: id<'message'>(randomUUID()), appId: run.appId, conversationId: run.conversationId,
-        runId: run.id, role: 'assistant', content, status: 'complete', createdAt: timestamp() });
-      this.storage.appendEvent(run.appId, run.id, 'run.completed', { state, error, cancellation: result?.cancellation ?? null });
+        runId: run.id, role: 'assistant', content:displayText(content), status: 'complete', createdAt: timestamp() });
+      this.storage.appendEvent(run.appId, run.id, 'run.completed', { state, error, output,exitCode:result?.exitCode ?? null,cancellation: result?.cancellation ?? null });
     });
+    this.log.write(this.getRun(run.appId,run.conversationId,run.id));
   }
   private storageFailure() {
     this.failed = true;
-    for (const job of this.active.values()) { job.controller.abort(); this.services.policy.cancel(job.run.id); void job.worker?.close(true).catch(() => {}); }
+    this.pending=[]; this.pendingBytes=0; this.queue=[];
+    for (const job of this.active.values()) { job.controller.abort(); try { this.services.policy.cancel(job.run.id); } catch { /* storage already failed */ } void job.worker?.close(true).catch(() => {}); }
   }
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.stopped = true; clearInterval(this.timer);
     this.closing = (async () => {
-      for (const job of [...this.queue, ...this.active.values()]) this.cancel(this.getRun(job.run.appId, job.run.conversationId, job.run.id));
+      if (!this.failed) for (const job of [...this.queue, ...this.active.values()]) this.cancel(this.getRun(job.run.appId, job.run.conversationId, job.run.id));
       await Promise.all([...this.active.values()].map(job => job.done));
       await Promise.all([...this.workers.values()].map(entry => entry.retiring ?? entry.worker.close(true)));
       this.flush(); this.workers.clear(); this.subscriptions.clear(); this.services.policy.off('event', this.policyEvent);
