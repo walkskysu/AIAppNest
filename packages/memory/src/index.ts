@@ -2,6 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DomainError, id, timestamp, type Memory, type Run } from '@aiappnest/domain';
 import { memoryRequestSchema, memoryViewSchema, publicError, type MemoryReply, type Result } from '@aiappnest/contracts';
 import type { Storage } from '@aiappnest/storage';
+import { CandidateService } from './candidates';
+import { validateContent } from './safety';
+export { CandidateService, extractionLimits } from './candidates';
 
 // Conservative deterministic estimate, including labels and delimiters.
 export const estimateTokens = (text: string) => Buffer.byteLength(text,'utf8');
@@ -13,9 +16,6 @@ export function keywords(text: string): Set<string> {
   const terms = text.normalize('NFKC').toLowerCase().match(/[a-z0-9_]+|[\p{Script=Han}]+/gu) ?? [];
   return new Set(terms.flatMap(term => /^[\p{Script=Han}]+$/u.test(term)
     ? term.length === 1 ? [term] : Array.from({ length:term.length-1 },(_,i) => term.slice(i,i+2)) : [term]));
-}
-function validateContent(content: string) {
-  if (/(?:sk-[a-z0-9_-]{8,}|(?:api[_ -]?key|password|passwd|secret|token|密码|密钥)\s*["']?\s*[:=：]\s*\S+|bearer\s+[a-z0-9._-]{8,}|-----BEGIN [\w ]*PRIVATE KEY-----|AKIA[A-Z0-9]{16}|gh[pousr]_[a-z0-9]{16,})/i.test(content)) throw new DomainError('INVALID_INPUT');
 }
 export class MemoryService {
   constructor(private readonly storage: Storage) {}
@@ -34,6 +34,17 @@ export class MemoryService {
       const input = parsed.data, appId = id<'app'>(input.appId);
       const value = this.storage.transaction((): MemoryReply => {
         this.storage.apps.get({ id:appId });
+        const candidates=new CandidateService(this.storage);
+        if(input.operation==='candidates') {
+          const result=this.storage.candidates.list(appId,input.limit,input.offset);
+          return {operation:'candidates',total:result.total,candidates:result.ids.map(mid=>candidates.view(appId,mid))};
+        }
+        if(input.operation==='tasks') return {operation:'tasks',...this.storage.candidates.tasks(appId,input.limit,input.offset)};
+        if(input.operation==='retry') return {operation:'retry',task:candidates.retry(appId,input.taskId,input.expectedVersion)};
+        if(input.operation==='review') return {operation:'review',memory:candidates.review(input)};
+        if(input.operation==='search') return {operation:'search',...this.storage.search.search(appId,input.query,input.kind,input.mode,input.limit,input.offset)};
+        if(input.operation==='rebuild') { this.storage.search.rebuild();return {operation:'rebuild'}; }
+        if(input.operation==='history') { this.storage.latestMemory(appId,id<'memory'>(input.memoryId));return {operation:'history',relations:this.storage.candidates.history(appId,input.memoryId)}; }
         if (input.operation === 'list') {
           const result = this.storage.listMemories(appId,input.type,input.limit,input.offset);
           result.memories.forEach(m => this.source(m));
@@ -60,6 +71,7 @@ export class MemoryService {
           const previous = this.storage.latestMemory(appId,id<'memory'>(input.memoryId)); this.source(previous);
           if (previous.version !== input.expectedVersion) throw new DomainError('VERSION_CONFLICT');
           if (previous.status === 'deleted') throw new DomainError('NOT_FOUND');
+          if (['candidate','conflict'].includes(previous.status)) throw new DomainError('INVALID_INPUT');
           memory = { ...previous,version:previous.version+1,updatedAt:timestamp(Math.max(now,previous.updatedAt)),
             ...(input.operation === 'update' ? { type:input.type,content:input.content,priority:input.priority,
               expiresAt:input.expiresAt === null ? null : timestamp(input.expiresAt),status:'active' as const }
@@ -83,7 +95,7 @@ export class MemoryService {
       if (current.state !== 'starting' || conversation.status !== 'active') throw new DomainError('INVALID_INPUT');
       if (!config.enabled || this.storage.trialForConversation(current.appId,current.conversationId)) return '';
       const terms = keywords(query), budget = Math.max(0,Math.min(config.tokenBudget,Number.isFinite(remaining) ? Math.floor(remaining) : 0));
-      const ranked = this.storage.activeMemories(current.appId).map(memory => ({ memory,score:[...keywords(memory.content)].filter(k => terms.has(k)).length }))
+      const ranked = this.storage.relevantMemories(current.appId,query).map(memory => ({ memory,score:[...keywords(memory.content)].filter(k => terms.has(k)).length }))
         .filter(item => item.score > 0).sort((a,b) => b.score-a.score || (b.memory.priority ?? 0)-(a.memory.priority ?? 0)
           || b.memory.updatedAt-a.memory.updatedAt || (a.memory.id < b.memory.id ? -1 : 1));
       let text = prefix, position = 0;

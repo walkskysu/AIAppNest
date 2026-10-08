@@ -163,6 +163,42 @@ test('Memory UI: confirmed save, source jump, type filter, version history, disa
   t.diagnostic('Deterministic model; real Electron IPC, MemoryService, SQLite, Pi and Windows. Not real-model M01/M10 acceptance.');
 });
 
+test('H02/H05/H06/H07 candidate conflict review and Chinese memory/message search through production desktop/host/model worker', {timeout:90000},async t=>{
+  const requests=[];
+  const server=createServer(async(req,res)=>{
+    let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw);requests.push(body);
+    const extracting=body.messages.some(m=>m.role==='system'&&typeof m.content==='string'&&m.content.includes('Extract durable'));
+    const answer=extracting?JSON.stringify({candidates:[{type:'preference',content:'回答偏好：简短中文',subject:'回答偏好'}]}):'候选测试对话已完成';
+    res.writeHead(200,{'content-type':'text/event-stream'});
+    for(const [delta,finish_reason] of [[{role:'assistant',content:answer},null],[{},'stop']])res.write('data: '+JSON.stringify({id:'candidate-ui',object:'chat.completion.chunk',created:1,model:'fixture',choices:[{index:0,delta,finish_reason}]})+'\n\n');
+    res.end('data: [DONE]\n\n');
+  });
+  server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>{server.close(resolve);server.closeAllConnections();}));
+  const {page}=await launch(t);await ready(page);
+  const appId=await page.evaluate(async endpoint=>{
+    const ok=r=>{if(!r.ok)throw Error(r.error.message);return r.value;};
+    const model=ok(await window.desktop.providers({operation:'save',input:{config:{name:'Candidate fixture',providerType:'local-openai',endpoint,modelId:'fixture',authMode:'none',settings:{timeoutMs:10000}},credential:{action:'clear'}}})).profile;
+    const metadata={name:'候选审核界面测试',description:'',icon:'book',category:'',favorite:false};let app=ok(await window.desktop.apps({operation:'create',metadata})).app;
+    if(app.draft.memory.automaticCandidates!==false)throw Error('not disabled by default');
+    app=ok(await window.desktop.apps({operation:'update',appId:app.id,expectedVersion:app.version,metadata,draft:{...app.draft,role:'助手',memory:{enabled:true,automaticCandidates:true,maxItems:8,tokenBudget:1500},model:{providerProfileId:model.id,expectedRevision:model.revision,temperature:0,maxOutputTokens:1024}}})).app;
+    ok(await window.desktop.apps({operation:'publish',appId:app.id,expectedVersion:app.version}));
+    ok(await window.desktop.memories({operation:'save',appId:app.id,content:'回答偏好：详细英文',type:'preference',priority:0,expiresAt:null,confirmed:true}));return app.id;
+  },`http://127.0.0.1:${server.address().port}/v1`);
+  await page.reload();await ready(page);await page.getByRole('button',{name:'打开应用',exact:true}).click();await page.getByRole('button',{name:'新建对话',exact:true}).click();
+  await page.getByLabel('输入任务',{exact:true}).fill('回答偏好：简短中文 UI_SOURCE_UNIQUE');await page.getByRole('button',{name:'发送',exact:true}).click();await page.getByText('候选测试对话已完成',{exact:true}).waitFor();
+  await until(async()=>{const r=await page.evaluate(appId=>window.desktop.memories({operation:'candidates',appId}),appId);return r.ok&&r.value.total===1;});
+  const extraction=requests.find(body=>body.messages.some(m=>m.role==='system'&&typeof m.content==='string'&&m.content.includes('Extract durable')));assert.equal(extraction.tools,undefined);assert.equal(extraction.max_tokens,1024);
+  await page.getByRole('button',{name:'管理应用记忆',exact:true}).click();const panel=page.getByLabel('候选审核',{exact:true});
+  await panel.getByText('回答偏好：简短中文',{exact:true}).waitFor();await panel.getByText('回答偏好：详细英文',{exact:true}).waitFor();
+  await panel.getByText('查看来源消息',{exact:true}).click();await panel.getByText('回答偏好：简短中文 UI_SOURCE_UNIQUE',{exact:true}).waitFor();
+  await panel.getByRole('textbox').fill('回答偏好：简短中文，附英文详情');await panel.getByRole('button',{name:'确认合并为编辑内容',exact:true}).click();await panel.getByText('暂无待审核候选。',{exact:true}).waitFor();
+  const search=page.getByLabel('中文搜索',{exact:true});await search.getByLabel('搜索词',{exact:true}).fill('简短中文');await search.getByRole('button',{name:'搜索',exact:true}).click();await search.getByText('共 1 条结果',{exact:true}).waitFor();
+  await search.getByLabel('搜索范围',{exact:true}).selectOption('message');await search.getByLabel('搜索词',{exact:true}).fill('UI_SOURCE_UNIQUE');await search.getByRole('button',{name:'搜索',exact:true}).click();await search.getByText('回答偏好：简短中文 UI_SOURCE_UNIQUE',{exact:true}).first().waitFor();
+  await search.getByRole('button',{name:'跳转会话',exact:true}).click();await page.getByLabel('输入任务',{exact:true}).waitFor();
+  const accepted=await page.evaluate(appId=>window.desktop.memories({operation:'list',appId}),appId);assert.equal(accepted.value.memories.filter(m=>m.status==='active').length,1);assert.equal(accepted.value.memories.filter(m=>m.status==='disabled').length,1);
+  t.diagnostic('Actual Windows Electron/preload/Host/Pi/extraction worker/SQLite with deterministic SSE only. Real-model and human acceptance remain pending.');
+});
+
 test('File F01/F02/F03/F07/F10 desktop attachment selection, removal, import failure and inert artifact preview through real IPC/Pi', { timeout:60000 },async t => {
   const { app,page,profile } = await launch(t); await ready(page);
   const malicious = '<script>window.PWNED=1</script><img src="https://invalid.example/pixel" onerror="alert(1)">';

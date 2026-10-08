@@ -10,6 +10,9 @@ import { DataPaths, resolveDataRoot } from './paths';
 import { migrate } from './migrations';
 import { guard, repository, type RepositorySpec } from './repository';
 import { schemas } from './schemas';
+import { SearchIndex, SEARCH_VERSION, searchTerms } from './search';
+import { CandidateStore } from './candidates';
+export { normalizeSearch } from './search';
 import { appConfigSchema, newAppConfig, type AppConfig } from '@aiappnest/domain';
 export { DataPaths, resolveDataRoot } from './paths';
 export type { Repository, Page } from './repository';
@@ -36,6 +39,8 @@ export class Storage {
   readonly attachments;
   readonly providers;
   readonly grants;
+  readonly search: SearchIndex;
+  readonly candidates: CandidateStore;
 
   constructor(root = resolveDataRoot()) {
     this.paths = new DataPaths(root);
@@ -78,6 +83,11 @@ export class Storage {
     } });
     this.providers = make<ProviderProfile, Key<ProviderProfile,'id'>, Record<string,never>>('provider_profiles', schemas.providers, ['id'], [], 'createdAt,id', { json: ['settings'] });
     this.grants = make<Grant, Key<Grant,'id'|'appId'>, AppScope>('grants', schemas.grants, ['id','appId'], ['appId'], 'createdAt,id');
+    this.search = new SearchIndex(this.db, fn => this.transaction(fn));
+    this.candidates = new CandidateStore(this.db);
+    if (this.db.prepare('SELECT version FROM search_meta').get()?.version !== SEARCH_VERSION) {
+      try { this.search.rebuild(); } catch { /* Raw data remains available; searches fail closed until rebuild succeeds. */ }
+    }
   }
 
   /** Draft changes share apps.version with metadata, publication and archive operations. */
@@ -413,9 +423,13 @@ export class Storage {
     if (!row) throw new DomainError('NOT_FOUND');
     return this.memories.get({ appId,id:memoryId,version:row.version as number });
   }
+  runUserMessage(appId:AppId,runId:RunId):Message|undefined {
+    const row=this.db.prepare("SELECT id FROM messages WHERE appId=? AND runId=? AND role='user' AND status='complete' ORDER BY createdAt,id LIMIT 1").get(appId,runId);
+    return row ? this.messages.get({appId,id:row.id as Message['id']}) : undefined;
+  }
   listMemories(appId: AppId, type: string | undefined, limit: number, offset: number) {
     this.apps.get({ id:appId });
-    const where = "appId=? AND status!='deleted' AND version=(SELECT max(version) FROM memories WHERE appId=m.appId AND id=m.id)" + (type ? ' AND type=?' : '');
+    const where = "appId=? AND status IN ('active','disabled') AND version=(SELECT max(version) FROM memories WHERE appId=m.appId AND id=m.id)" + (type ? ' AND type=?' : '');
     const args = type ? [appId,type] : [appId];
     const rows = this.db.prepare('SELECT id,version FROM memories m WHERE '+where+' ORDER BY updatedAt DESC,id LIMIT ? OFFSET ?').all(...args,limit,offset);
     return { total:this.db.prepare('SELECT count(*) n FROM memories m WHERE '+where).get(...args)!.n as number,
@@ -435,6 +449,21 @@ export class Storage {
         AND version=(SELECT max(version) FROM memories WHERE id=m.id) ORDER BY updatedAt DESC,id`).all(appId, at);
       return rows.map(row => this.memories.get({ appId, id: row.id as Memory['id'], version: row.version as number }));
     });
+  }
+  relevantMemories(appId:AppId,query:string):Memory[] {
+    this.apps.get({id:appId});
+    if(this.db.prepare('SELECT version FROM search_meta').get()?.version!==SEARCH_VERSION) throw new DomainError('STORAGE_UNAVAILABLE');
+    const terms=searchTerms(query.slice(0,1000));if(!terms.length)return [];
+    const rows=this.db.prepare(`SELECT m.* FROM search_fts JOIN search_documents d ON d.rowid=search_fts.rowid
+      JOIN memories m ON m.appId=d.appId AND m.id=d.id AND m.version=d.version
+      WHERE d.appId=? AND d.kind='memory' AND search_fts MATCH ? AND m.status='active' AND (m.expiresAt IS NULL OR m.expiresAt>?)
+      ORDER BY search_score(d.grams,?) DESC,m.priority DESC,m.updatedAt DESC,m.id LIMIT 1000`)
+      .all(appId,terms.map(t=>'"'+t+'"').join(' OR '),Date.now(),terms.join(' '));
+    return rows as unknown as Memory[];
+  }
+  reviewableMemories(appId:AppId):Memory[] {
+    return this.db.prepare(`SELECT m.* FROM memories m WHERE appId=? AND status IN ('active','candidate','conflict')
+      AND (expiresAt IS NULL OR expiresAt>?) AND version=(SELECT max(version) FROM memories WHERE appId=m.appId AND id=m.id)`).all(appId,Date.now()) as unknown as Memory[];
   }
   /** Internal PolicyService persistence; never exposed as arbitrary record IPC. */
   policyRecords(kind: 'grant' | 'approval' | 'trust', appId?: string, conversationId?: string): string[] {

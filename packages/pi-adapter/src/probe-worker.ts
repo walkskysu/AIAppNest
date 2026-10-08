@@ -3,7 +3,7 @@ import { streamOpenAICompletions } from '@mariozechner/pi-ai/openai-completions'
 import type { ProviderRuntime } from './runtime';
 import type { ProbeCode } from '@aiappnest/contracts';
 
-const runtime = workerData as ProviderRuntime;
+const runtime = workerData as ProviderRuntime & { extraction?:{system:string;text:string;maxTokens:number} };
 const nativeFetch = globalThis.fetch;
 let status = 0;
 let validFinish = false;
@@ -70,11 +70,13 @@ globalThis.fetch = async (input, init) => {
 
 async function run() {
   let code: ProbeCode = 'PROTOCOL_ERROR';
+  let extracted:string|undefined;
   try {
     const message = await streamOpenAICompletions(runtime.model, {
-      messages: [{ role: 'user', content: 'Reply with OK.', timestamp: Date.now() }],
+      ...(runtime.extraction ? {systemPrompt:runtime.extraction.system} : {}),
+      messages: [{ role: 'user', content: runtime.extraction?.text ?? 'Reply with OK.', timestamp: Date.now() }],
     }, {
-      apiKey: runtime.apiKey, maxTokens: runtime.providerType === 'deepseek' ? 128 : 16, maxRetries: 0, timeoutMs: runtime.timeoutMs,
+      apiKey: runtime.apiKey, maxTokens: runtime.extraction?.maxTokens ?? (runtime.providerType === 'deepseek' ? 128 : 16), maxRetries: 0, timeoutMs: runtime.timeoutMs,
       // Pi 0.73.1 supports onPayload before SDK serialization. reasoning:false alone
       // does not emit DeepSeek's switch. This fixed adapter is not a user field bag.
       onPayload: runtime.providerType === 'deepseek'
@@ -86,12 +88,16 @@ async function run() {
     if (!protocolFailure && complete && done && validFinish && message.stopReason === 'stop' && message.content.some(c => c.type === 'text' && c.text.trim()) && message.content.every(c => c.type === 'text')) code = 'SUCCESS';
     else if (!protocolFailure && complete && done && lengthFinish) code = 'INCOMPLETE_RESPONSE';
     else if (!status) code = 'NETWORK_ERROR';
+    if(code==='SUCCESS' && runtime.extraction) {
+      extracted=message.content.filter(c=>c.type==='text').map(c=>c.text).join('');
+      if(Buffer.byteLength(extracted)>8192) {extracted=undefined;code='PROTOCOL_ERROR';}
+    }
   } catch { code = status ? 'PROTOCOL_ERROR' : 'NETWORK_ERROR'; }
   if (status === 401 || status === 403) code = 'AUTH_FAILED';
   else if (status === 402 && runtime.providerType === 'deepseek') code = 'QUOTA_EXCEEDED';
   else if (status === 404) code = 'MODEL_NOT_FOUND';
   else if (status === 429) code = 'RATE_LIMITED';
   else if (status >= 500) code = 'NETWORK_ERROR';
-  parentPort!.postMessage(code);
+  parentPort!.postMessage(runtime.extraction ? (code==='SUCCESS' ? {ok:true,text:extracted} : {ok:false}) : code);
 }
 void run();

@@ -1,5 +1,6 @@
 import { defineComponent, h, onMounted, ref, watch, type PropType } from 'vue';
 import type { MemoryView, MemoryRequest, MemoryReply, MessageView } from '@aiappnest/contracts';
+import { CandidateReview, MemorySearch } from './memory-review';
 const labels = { preference:'偏好',fact:'事实',convention:'项目约定',term:'术语' };
 const call = async (input:MemoryRequest) => { const result = await window.desktop.memories(input); if (!result.ok) throw new Error(result.error.message); return result.value; };
 export const MemoryManager = defineComponent({
@@ -7,21 +8,26 @@ export const MemoryManager = defineComponent({
   setup(props,{ emit }) {
     const items = ref<MemoryView[]>([]),filter = ref(''),offset = ref(0),total = ref(0),feedback = ref(''),busy = ref(false);
     const editing = ref<MemoryView>(),content = ref(props.source?.content ?? ''),type = ref<MemoryView['type']>('preference'),priority = ref(0),expiry = ref(''),sourceId = ref(props.source?.id),deleting = ref<MemoryView>();
+    const relations=ref<Record<string,string>>({});
     const act = async (fn:()=>Promise<void>) => { if (busy.value) return; busy.value = true; feedback.value = ''; try { await fn(); } catch(e) { feedback.value = e instanceof Error ? e.message : '记忆操作失败'; } finally { busy.value = false; } };
     const load = async () => { const result = await call({ operation:'list',appId:props.appId,...(filter.value ? { type:filter.value as MemoryView['type'] } : {}),limit:20,offset:offset.value }); if (result.operation === 'list') { items.value = result.memories; total.value = result.total; } };
     const reset = () => { editing.value = undefined;content.value = '';type.value = 'preference';priority.value = 0;expiry.value = '';sourceId.value = undefined; };
     const button = (text:string,fn:()=>Promise<void>,disabled=false) => h('button',{ type:'button',disabled:busy.value || disabled,onClick:()=>act(fn) },text);
     onMounted(()=>act(load));
     return () => h('section',{ class:'card memory-manager','aria-label':'应用记忆管理' },[
-      h('h2','应用记忆'),h('p','仅手动保存你确认的内容。不要保存密钥、密码或秘密；检测不能识别全部敏感信息。'),
+      h('h2','应用记忆'),h('p','只有你确认的内容才成为有效记忆。不要保存密钥、密码或秘密；检测不能识别全部敏感信息。'),
       h('p','删除立即停止未来检索。旧会话、历史引用和备份可能仍含内容；聊天与用户文件不会随之删除。关联历史清理将在数据管理功能提供。'),
       button('返回聊天',async()=>emit('close')),button('从新会话开始',async()=>emit('newConversation')),
+      h(MemorySearch,{appId:props.appId,onSource:(...args:unknown[])=>emit('source',...args)}),
+      h(CandidateReview,{appId:props.appId,onChanged:()=>act(load),onSource:(...args:unknown[])=>emit('source',...args)}),
       h('p',{ role:'status','data-testid':'memory-feedback' },feedback.value),
       h('label',['按类型筛选',h('select',{ 'aria-label':'按类型筛选',disabled:busy.value,value:filter.value,onChange:(e:Event)=>{ filter.value=(e.target as HTMLSelectElement).value;offset.value=0;void act(load); } },[h('option',{ value:'' },'全部'),...Object.entries(labels).map(([value,label])=>h('option',{value},label))])]),
       ...items.value.map(m=>h('article',{ class:'card',key:m.id },[
         h('p',`${labels[m.type]} · v${m.version} · ${m.status} · 优先级 ${m.priority}`),h('p',m.content),
         h('small',`更新 ${new Date(m.updatedAt).toLocaleString()} · 有效期 ${m.expiresAt === null ? '不限' : new Date(m.expiresAt).toLocaleString()}`),
         m.sourceConversationId ? button('跳转来源',async()=>emit('source',m.sourceConversationId,m.sourceMessageId)) : h('span','手工新增'),
+        button('查看替代关系',async()=>{const result=await call({operation:'history',appId:props.appId,memoryId:m.id});if(result.operation==='history')relations.value[m.id]=result.relations.map(r=>`v${r.version} 替代 ${r.supersedesId} 的 v${r.supersedesVersion}`).join('；')||'没有替代其他记忆；编辑历史保留在各版本中。';}),
+        relations.value[m.id]?h('p',relations.value[m.id]):null,
         button('编辑',async()=>{ editing.value=m;content.value=m.content;type.value=m.type;priority.value=m.priority;expiry.value=m.expiresAt===null ? '' : new Date(m.expiresAt).toISOString();sourceId.value=undefined; }),
         button('停用',async()=>{ await call({ operation:'disable',appId:props.appId,memoryId:m.id,expectedVersion:m.version });await load(); },m.status==='disabled'),
         button('删除',async()=>{ deleting.value=m; }),
