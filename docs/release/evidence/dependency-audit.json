@@ -1,0 +1,211 @@
+{
+  "source": "Preserved npm audit output from earlier issue-20 work in this workspace (2026-10-09)",
+  "status": "REQUIRES_SECURITY_DISPOSITION_BEFORE_FORMAL_RELEASE",
+  "counts": {
+    "info": 0,
+    "low": 0,
+    "moderate": 0,
+    "high": 8,
+    "critical": 0,
+    "total": 8
+  },
+  "vulnerabilities": [
+    {
+      "name": "@mariozechner/pi-agent-core",
+      "severity": "high",
+      "range": ">=0.50.0",
+      "via": [
+        "@mariozechner/pi-ai"
+      ],
+      "fixAvailable": true
+    },
+    {
+      "name": "@mariozechner/pi-ai",
+      "severity": "high",
+      "range": ">=0.50.0",
+      "via": [
+        "proxy-agent"
+      ],
+      "fixAvailable": {
+        "name": "@mariozechner/pi-ai",
+        "version": "0.49.3",
+        "isSemVerMajor": true
+      }
+    },
+    {
+      "name": "@mariozechner/pi-coding-agent",
+      "severity": "high",
+      "range": ">=0.27.5",
+      "via": [
+        "@mariozechner/pi-agent-core",
+        "@mariozechner/pi-ai",
+        {
+          "source": 1123902,
+          "name": "@mariozechner/pi-coding-agent",
+          "dependency": "@mariozechner/pi-coding-agent",
+          "title": "Pi Agent: Predictable temporary extension install paths allow local privilege escalation on shared Linux hosts",
+          "url": "https://github.com/advisories/GHSA-jfgx-wxx8-mp94",
+          "severity": "high",
+          "cwe": [
+            "CWE-379"
+          ],
+          "cvss": {
+            "score": 7.3,
+            "vectorString": "CVSS:3.1/AV:L/AC:L/PR:L/UI:R/S:U/C:H/I:H/A:H"
+          },
+          "range": ">=0.50.0 <=0.73.1"
+        },
+        {
+          "source": 1123905,
+          "name": "@mariozechner/pi-coding-agent",
+          "dependency": "@mariozechner/pi-coding-agent",
+          "title": "Pi Agent: Race condition in Pi auth.json writes could expose stored credentials",
+          "url": "https://github.com/advisories/GHSA-r95r-rj6r-c39x",
+          "severity": "low",
+          "cwe": [
+            "CWE-367",
+            "CWE-732"
+          ],
+          "cvss": {
+            "score": 2.2,
+            "vectorString": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:N/A:N"
+          },
+          "range": ">=0.28.0 <=0.73.1"
+        },
+        {
+          "source": 1123907,
+          "name": "@mariozechner/pi-coding-agent",
+          "dependency": "@mariozechner/pi-coding-agent",
+          "title": "Pi Agent: Potential XSS in HTML session exports via Markdown URL sanitization bypass",
+          "url": "https://github.com/advisories/GHSA-7v5m-pr3q-6453",
+          "severity": "low",
+          "cwe": [
+            "CWE-79"
+          ],
+          "cvss": {
+            "score": 2.5,
+            "vectorString": "CVSS:3.1/AV:L/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N"
+          },
+          "range": ">=0.27.5 <=0.73.1"
+        },
+        "extract-zip"
+      ],
+      "fixAvailable": {
+        "name": "@mariozechner/pi-coding-agent",
+        "version": "0.49.3",
+        "isSemVerMajor": true
+      }
+    },
+    {
+      "name": "basic-ftp",
+      "severity": "high",
+      "range": "<=6.2.0",
+      "via": [
+        {
+          "source": 1240853,
+          "name": "basic-ftp",
+          "dependency": "basic-ftp",
+          "title": "basic-ftp: Quadratic-time CPU denial of service in Client.list() Unix directory-listing parser (RE_LINE backtracking)",
+          "url": "https://github.com/advisories/GHSA-c475-qrg2-pj4r",
+          "severity": "high",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<=6.2.0"
+        }
+      ],
+      "fixAvailable": {
+        "name": "@mariozechner/pi-ai",
+        "version": "0.49.3",
+        "isSemVerMajor": true
+      }
+    },
+    {
+      "name": "extract-zip",
+      "severity": "high",
+      "range": "*",
+      "via": [
+        {
+          "source": 1139346,
+          "name": "extract-zip",
+          "dependency": "extract-zip",
+          "title": "extract-zip unvalidated symlink path traversal",
+          "url": "https://github.com/advisories/GHSA-jmr9-qjv8-65gv",
+          "severity": "high",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 8.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N"
+          },
+          "range": "<=2.0.1"
+        },
+        {
+          "source": 1193685,
+          "name": "extract-zip",
+          "dependency": "extract-zip",
+          "title": "extract-zip allows arbitrary file writes through symlink archive entries",
+          "url": "https://github.com/advisories/GHSA-7pqw-9j4j-h8q3",
+          "severity": "high",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 8.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:H"
+          },
+          "range": "<=2.0.1"
+        }
+      ],
+      "fixAvailable": {
+        "name": "@mariozechner/pi-coding-agent",
+        "version": "0.49.3",
+        "isSemVerMajor": true
+      }
+    },
+    {
+      "name": "get-uri",
+      "severity": "high",
+      "range": ">=5.0.0",
+      "via": [
+        "basic-ftp"
+      ],
+      "fixAvailable": {
+        "name": "@mariozechner/pi-ai",
+        "version": "0.49.3",
+        "isSemVerMajor": true
+      }
+    },
+    {
+      "name": "pac-proxy-agent",
+      "severity": "high",
+      "range": ">=6.0.0",
+      "via": [
+        "get-uri"
+      ],
+      "fixAvailable": {
+        "name": "@mariozechner/pi-ai",
+        "version": "0.49.3",
+        "isSemVerMajor": true
+      }
+    },
+    {
+      "name": "proxy-agent",
+      "severity": "high",
+      "range": ">=6.0.0",
+      "via": [
+        "pac-proxy-agent"
+      ],
+      "fixAvailable": {
+        "name": "@mariozechner/pi-ai",
+        "version": "0.49.3",
+        "isSemVerMajor": true
+      }
+    }
+  ]
+}

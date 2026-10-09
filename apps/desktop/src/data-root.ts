@@ -17,6 +17,10 @@ export function selectedDataRoot(profile:string,fallback:string):string {
   const file=join(profile,'data-root.json');unlinked(file);if(!existsSync(file))return fallback;
   const value=JSON.parse(readFileSync(file,'utf8'));
   if(value.version!==1 || typeof value.active!=='string' || typeof value.previous!=='string')throw new Error('INVALID_ROOT_POINTER');
+  // An upgrade exchange may temporarily remove the active directory. Let the leased
+  // Service Host recover its journal before considering the old restore fallback.
+  unlinked(value.active);unlinked(value.active+'.upgrade.json');
+  if(existsSync(value.active+'.upgrade.json'))return value.active;
   if(complete(value.active))return value.active;
   unlinked(value.previous);const previousDb=join(value.previous,'data/platform.db');unlinked(previousDb);
   if(existsSync(previousDb)&&lstatSync(previousDb).isFile()&&lstatSync(previousDb).nlink===1)return value.previous;

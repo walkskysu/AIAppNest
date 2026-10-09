@@ -14,10 +14,15 @@ import { PolicyService } from '../../../packages/policy/src/index';
 import { readEngineRuntime } from '../../../packages/pi-adapter/src/index';
 import { RunScheduler } from './runs';
 import { readRunSettings } from './run-settings';
+import { acquireDataLease } from './data-lease';
+import { currentRelease, prepareRelease } from './release';
 
 // Only the owning Main process can access this inherited IPC pipe. No network listener.
 if (!process.send || process.versions.node !== SERVICE_NODE_VERSION) process.exit(1);
 let ready = false;
+let initializing = false;
+let initializationDone: Promise<void> | undefined;
+let releaseLease: (() => void) | undefined;
 let storage: Storage | undefined;
 let providers: ProviderService | undefined;
 let apps: AppService | undefined;
@@ -30,9 +35,10 @@ let files: FileService | undefined;
 let data: DataService | undefined;
 let pendingWrites=0;
 let closing: Promise<void> | undefined;
-const close = () => { policy?.close(); policy = undefined; storage?.close(); storage = undefined; };
+const close = () => { policy?.close(); policy = undefined; storage?.close(); storage = undefined; releaseLease?.(); releaseLease = undefined; };
 const shutdown = () => closing ??= (async () => {
   ready = false;
+  await initializationDone;
   await data?.close();
   files?.close();
   try { await runs?.close(); } catch { process.exitCode = 1; }
@@ -45,7 +51,7 @@ const send = (message: HostOutput) => {
 process.on('disconnect', () => { void shutdown().finally(() => process.exit(process.exitCode ?? 0)); });
 process.on('exit', close);
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { void shutdown().finally(() => process.exit(0)); });
-process.on('message', (raw: unknown) => {
+process.on('message', async (raw: unknown) => {
   const parsed = hostInputSchema.safeParse(raw);
   if (!parsed.success) {
     send({ kind: 'fatal', error: publicError('PROTOCOL_ERROR') });
@@ -60,10 +66,19 @@ process.on('message', (raw: unknown) => {
     if(!permitted && 'id' in message){send({kind: (message.kind+'-response'),id:message.id,result:{ok:false,error:publicError('BUSY')}} as HostOutput);return;}
   }
   if (message.kind === 'shutdown') { clearTimeout(handshakeDeadline); void shutdown(); return; }
-  if (message.kind === 'hello' && !ready) {
+  if (message.kind === 'hello' && !ready && !initializing && !closing) {
+    initializing = true;
+    let finishInitialization!: () => void;
+    initializationDone = new Promise(resolve => { finishInitialization = resolve; });
     clearTimeout(handshakeDeadline);
     try {
-      storage = new Storage(resolveDataRoot(process.env.AIAPPNEST_DATA_ROOT));
+      const root = resolveDataRoot(process.env.AIAPPNEST_DATA_ROOT);
+      releaseLease = await acquireDataLease(root, join(__dirname, 'data-lease.exe'));
+      if (closing) { close(); return; }
+      const release = currentRelease(__dirname);
+      if (release) await prepareRelease(root, release);
+      if (closing) { close(); return; }
+      storage = new Storage(root);
       providers = new ProviderService(storage, new CredentialService(storage.paths, join(__dirname, 'credential-host.exe')));
       skills = new SkillRegistry(storage);
       apps = new AppService(storage, providers, undefined, skills);
@@ -79,7 +94,7 @@ process.on('message', (raw: unknown) => {
       process.exitCode = 1;
       process.disconnect();
       return;
-    }
+    } finally { finishInitialization(); }
     ready = true;
     send({ kind: 'ready', nonce: message.nonce, version: SERVICE_PROTOCOL_VERSION, pid: process.pid, nodeVersion: process.versions.node });
   } else if (message.kind === 'ping' && ready) {

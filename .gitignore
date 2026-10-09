@@ -1,6 +1,7 @@
 # Logs
 spikes/pi-windows/.runs/
 .test-*/
+.test-*.lease
 logs
 *.log
 npm-debug.log*
@@ -84,6 +85,8 @@ out
 # Nuxt.js build / generate output
 .nuxt
 dist
+release-output/
+.npm-audit-release.json
 .output
 
 # Gatsby files
