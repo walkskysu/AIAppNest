@@ -1,11 +1,12 @@
-name: Windows foundation
+name: Windows internal candidate
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  integration:
-    runs-on: windows-latest
-    timeout-minutes: 20
+  candidate:
+    runs-on: windows-2025
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,7 +17,7 @@ jobs:
       - run: npm ci
       - run: node node_modules/electron/install.js
       - run: npm test
-      - name: Upload unsigned internal acceptance candidate (not a public release)
+      - name: Upload internal candidate only (no public release)
         uses: actions/upload-artifact@v4
         with:
           name: windows-internal-candidate

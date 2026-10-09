@@ -2,6 +2,8 @@ import { app, BrowserWindow, dialog, shell, ipcMain, protocol, session, type Ipc
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join, extname } from 'node:path';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { channels, emptySchema, publicError, skillRequestSchema, type Result, type ServiceStatus } from '@aiappnest/contracts';
 import { ServiceManager } from './service-manager';
 import { policyScopeSchema, policyRequestSchema, trustedBoundaryNotice } from '@aiappnest/contracts';
@@ -33,9 +35,31 @@ if (!app.requestSingleInstanceLock()) {
     const profile=app.getPath('userData');
     const initialDataRoot=app.commandLine.hasSwitch('user-data-dir')?join(profile,'platform'):join(process.env.LOCALAPPDATA!,'LocalAIHub');
     const currentDataRoot=selectedDataRoot(profile,initialDataRoot);
+    if (app.isPackaged && app.commandLine.hasSwitch('rollback-release')) {
+      const node = join(root, 'runtime/node.exe'), cli = join(root, 'release-cli.cjs');
+      const run = (command: string, snapshot?: string) => promisify(execFile)(node, [cli, command, currentDataRoot, ...(snapshot ? [snapshot] : [])], { windowsHide: true,
+        env: { SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR, TEMP: process.env.TEMP, TMP: process.env.TMP } });
+      try {
+        const plan = JSON.parse((await run('plan')).stdout);
+        const confirmation = await dialog.showMessageBox({ type: 'warning', title: '回退到升级前快照',
+          message: plan.notice, detail: `数据目录：${plan.affectedRoot}\n快照时间：${new Date(plan.createdAt).toLocaleString()}\n运行时：${plan.release.id}`,
+          buttons: ['取消', '恢复快照并启动旧版本'], defaultId: 0, cancelId: 0 });
+        if (confirmation.response === 1) {
+          const result = JSON.parse((await run('rollback', plan.snapshot)).stdout);
+          app.releaseSingleInstanceLock();
+          const child = spawn(join(result.directory, '../../AIAppNest.exe'), app.commandLine.hasSwitch('user-data-dir') ? [`--user-data-dir=${profile}`] : [], {
+            detached: true, stdio: 'ignore', windowsHide: true,
+            env: Object.fromEntries(['SystemRoot','WINDIR','TEMP','TMP','USERPROFILE','LOCALAPPDATA','APPDATA'].flatMap(key => process.env[key] ? [[key, process.env[key]!]] : [])) });
+          child.on('error', () => dialog.showErrorBox('旧版本启动失败', '快照已恢复，请从保留的版本目录启动匹配的旧版本。'));
+          child.unref();
+        }
+      } catch { dialog.showErrorBox('无法回退', '请关闭其他平台实例，并确认旧版本与快照仍存在。数据未合并；保留所有 snapshot 和 stage 目录，按恢复说明处理。'); }
+      app.quit(); return;
+    }
     service = new ServiceManager({ nodePath: join(root, 'runtime', process.platform === 'win32' ? 'node.exe' : 'node'), entry: join(root, 'service-host.cjs'),
       // An explicitly selected Electron profile also isolates its platform data (tests/portable profiles).
       dataRoot: currentDataRoot,
+      startupMs: app.isPackaged ? 10 * 60 * 1000 : 5000,
     });
     const ses = session.defaultSession;
     ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));

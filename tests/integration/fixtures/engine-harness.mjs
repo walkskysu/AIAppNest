@@ -13,7 +13,7 @@ const bundle = mkdtempSync(resolve('.test-engine-bundle-'));
 await build({ entryPoints: ['tests/integration/fixtures/engine-entry.ts'], outfile: join(bundle, 'entry.mjs'), bundle: true, platform: 'node', format: 'esm', packages: 'external' });
 export const { DataService,BackupService,backupLimits,safeRelative,selectedDataRoot,switchDataRoot, extractRuntime, CandidateService, extractionLimits, Recovery, DiagnosticLog, diagnostics, activeTimeout, readSession, projectionId, DomainError, MemoryService, estimateTokens, keywords, memoryText, memoryHash, FileService, fileLimits, ChatService, RunFeed, safeExternal, shouldSubmit, RunScheduler, Storage, AppService, SkillRegistry, ProviderService, PolicyService, PiAdapter, readEngineRuntime, JsonlDecoder } = await import(pathToFileURL(join(bundle, 'entry.mjs')));
 after(() => rmSync(bundle, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
-export const runtime = readEngineRuntime(resolve('dist'));
+export const runtime = readEngineRuntime(resolve(process.env.AIAPPNEST_TEST_RUNTIME ?? 'dist'));
 export const ok = result => { assert.equal(result.ok, true, JSON.stringify(result)); return result.value; };
 export const until = async predicate => { const end = Date.now() + 15000; while (!predicate()) { assert.ok(Date.now() < end, 'condition timed out'); await delay(10); } };
 

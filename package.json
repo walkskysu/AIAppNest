@@ -25,7 +25,9 @@
     "engine:live": "node scripts/engine-live.mjs",
     "file:live": "node scripts/file-live.mjs",
     "recovery:verify": "npm run typecheck && npm run build && node scripts/recovery-faults.mjs",
-    "data:verify": "npm run typecheck && npm run build && node scripts/data-verify.mjs"
+    "data:verify": "npm run typecheck && npm run build && node scripts/data-verify.mjs",
+    "release:candidate": "node scripts/release-package.mjs",
+    "release:verify": "npm run typecheck && npm run build && node --test --test-concurrency=1 tests/integration/release*.test.mjs"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "0.73.1",

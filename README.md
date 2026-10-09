@@ -62,4 +62,4 @@ Service Host 在数据库初始化成功后报告就绪。默认数据目录为 
 
 **验证状态：**既有 Foundation/Storage 已在托管 Windows 环境通过完整回归，包含真实 Electron 和 Node 的安全与生命周期验证；新增 Provider 的测试状态见 [P01–P18](docs/technical/provider-validation.md)。受限 shell 的 Electron sandbox ACL 失败记录仍保留；没有关闭沙箱或以模拟结果替代桌面验收。前置 [Pi Spike 报告](docs/technical/pi-windows-spike-report.md)的真实模型验收仍未完成，既有 DPAPI 回归通过不代表此前全部验收门禁解除。GitHub Actions 结果须以远端实际执行为准。
 
-发行安装包、签名、自动更新不在本次范围；`dist` 是本机运行的构建目录，不是可分发安装包。已有 Pi 验证入口保留于 [spikes/pi-windows](spikes/pi-windows/README.md)。
+Windows 内部候选包包含受管理 Node/Pi、按用户安装器及数据升级/回退流程。`npm.cmd test` 在全部回归中验证实际包内运行时并构建安装器；也可独立执行 `npm.cmd run release:candidate`。输出位于 `release-output`，`dist` 仍仅用于本机开发。候选包未签名、未正式发布，最终验收 PENDING，Refs #20。安装/模型配置/备份/回退/卸载见[用户说明](docs/release/README.md)，真实环境待补项、许可证和受控发行策略见[L01–L10 记录](docs/release/acceptance.md)。已有 Pi 验证入口保留于 [spikes/pi-windows](spikes/pi-windows/README.md)。
