@@ -1,3 +1,4 @@
+import { dataHostRequestSchema, type DataHostRequest, type DataRequest, type DataReply } from '@aiappnest/contracts';
 import { activeTimeout } from '../../../packages/domain/src/active-time';
 import { memoryRequestSchema, type MemoryRequest, type MemoryReply } from '@aiappnest/contracts';
 import { fileHostRequestSchema, type FileHostRequest, type FileHostReply } from '@aiappnest/contracts';
@@ -13,7 +14,7 @@ import { appRequestSchema, type AppReply, type AppRequest } from '@aiappnest/con
 import { skillHostRequestSchema, type SkillHostReply, type SkillHostRequest } from '@aiappnest/contracts';
 import { policyHostRequestSchema, type PolicyHostReply, type PolicyHostRequest } from '@aiappnest/contracts';
 
-type Pending = { kind: 'memories-response' | 'files-response' | 'response' | 'providers-response' | 'apps-response' | 'skills-response' | 'policy-response' | 'runs-response' | 'chat-response'; operation?: MemoryRequest['operation'] | FileHostRequest['operation'] | ProviderRequest['operation'] | AppRequest['operation'] | SkillHostRequest['operation'] | PolicyHostRequest['operation'] | RunRequest['operation'] | ChatRequest['operation']; resolve: (result: Result<MemoryReply | FileHostReply | PingOutput | ProviderReply | AppReply | SkillHostReply | PolicyHostReply | RunReply | ChatReply>) => void; timer: NodeJS.Timeout };
+type Pending = { kind: 'data-response' | 'memories-response' | 'files-response' | 'response' | 'providers-response' | 'apps-response' | 'skills-response' | 'policy-response' | 'runs-response' | 'chat-response'; operation?: DataRequest['operation'] | DataHostRequest['operation'] | MemoryRequest['operation'] | FileHostRequest['operation'] | ProviderRequest['operation'] | AppRequest['operation'] | SkillHostRequest['operation'] | PolicyHostRequest['operation'] | RunRequest['operation'] | ChatRequest['operation']; resolve: (result: Result<DataReply | MemoryReply | FileHostReply | PingOutput | ProviderReply | AppReply | SkillHostReply | PolicyHostReply | RunReply | ChatReply>) => void; timer: NodeJS.Timeout };
 export function serviceEnvironment(dataRoot?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'LANG', 'LOCALAPPDATA']) {
@@ -91,7 +92,7 @@ export class ServiceManager extends EventEmitter {
           if (this.status.phase !== 'starting' || message.nonce !== this.nonce || message.pid !== child.pid || message.nodeVersion !== SERVICE_NODE_VERSION) { this.fail('PROTOCOL_ERROR'); return; }
           this.transition('ready');
           this.settleStart({ ok: true, value: this.snapshot() });
-        } else if (message.kind === 'memories-response' || message.kind === 'files-response' || message.kind === 'response' || message.kind === 'providers-response' || message.kind === 'apps-response' || message.kind === 'skills-response' || message.kind === 'policy-response' || message.kind === 'runs-response' || message.kind === 'chat-response') {
+        } else if (message.kind === 'data-response' || message.kind === 'memories-response' || message.kind === 'files-response' || message.kind === 'response' || message.kind === 'providers-response' || message.kind === 'apps-response' || message.kind === 'skills-response' || message.kind === 'policy-response' || message.kind === 'runs-response' || message.kind === 'chat-response') {
           const pending = this.pending.get(message.id);
           if (this.status.phase !== 'ready' || !pending || pending.kind !== message.kind) { this.fail('PROTOCOL_ERROR'); return; }
           if (message.kind !== 'response' && message.result.ok && pending.operation !== message.result.value.operation) { this.fail('PROTOCOL_ERROR'); return; }
@@ -201,6 +202,17 @@ export class ServiceManager extends EventEmitter {
       const id = randomUUID(), timer = activeTimeout(() => this.fail('REQUEST_TIMEOUT'), this.options.requestMs ?? 30000);
       this.pending.set(id, { kind: 'policy-response', operation: parsed.data.operation, resolve: result => resolve(result as Result<PolicyHostReply>), timer });
       this.send({ kind: 'policy', id, input: parsed.data });
+    });
+  }
+  data(input:unknown):Promise<Result<DataReply>> {
+    const parsed=dataHostRequestSchema.safeParse(input);
+    if(!parsed.success)return Promise.resolve({ok:false,error:publicError('INVALID_INPUT')});
+    if(this.status.phase!=='ready')return Promise.resolve({ok:false,error:publicError('NOT_READY')});
+    if(this.pending.size>=64)return Promise.resolve({ok:false,error:publicError('BUSY')});
+    return new Promise(resolve=>{
+      const id=randomUUID(),timer=activeTimeout(()=>this.fail('REQUEST_TIMEOUT'),this.options.requestMs??30000);
+      this.pending.set(id,{kind:'data-response',operation:parsed.data.operation==='request'?parsed.data.request.operation:'select',resolve:r=>resolve(r as Result<DataReply>),timer});
+      this.send({kind:'data',id,input:parsed.data});
     });
   }
   stop(): Promise<void> {

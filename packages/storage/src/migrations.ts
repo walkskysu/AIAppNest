@@ -295,6 +295,18 @@ CREATE TRIGGER message_search_delete AFTER DELETE ON messages BEGIN
  DELETE FROM search_documents WHERE kind='message' AND appId=OLD.appId AND id=OLD.id; END;
 CREATE TRIGGER conversation_search_archive AFTER UPDATE OF status ON conversations WHEN NEW.status='archived' BEGIN
  DELETE FROM search_documents WHERE kind='message' AND appId=NEW.appId AND conversationId=NEW.id; END;
+` }, { version:11,name:'data-maintenance',sql:`
+CREATE TABLE data_jobs(id TEXT PRIMARY KEY, value TEXT NOT NULL CHECK(json_valid(value)), plan TEXT NOT NULL CHECK(json_valid(plan))) STRICT;
+CREATE TABLE data_operations(operation TEXT NOT NULL,error TEXT,createdAt INTEGER NOT NULL) STRICT;
+CREATE TABLE app_recycle(appId TEXT PRIMARY KEY REFERENCES apps(id), previousStatus TEXT NOT NULL, createdAt INTEGER NOT NULL) STRICT;
+CREATE TABLE source_tombstones(appId TEXT NOT NULL, conversationId TEXT NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY(appId,conversationId)) STRICT;
+CREATE TABLE cleanup_guard(enabled INTEGER NOT NULL CHECK(enabled IN (0,1))) STRICT;
+INSERT INTO cleanup_guard VALUES(0);
+${['app_revisions','app_skills','memories','run_events','run_memory_links','revision_snapshots','attachments','artifacts','run_attachments','memory_candidates','memory_supersedes'].map(table=>`
+DROP TRIGGER ${table}_immutable_delete;
+CREATE TRIGGER ${table}_immutable_delete BEFORE DELETE ON ${table} WHEN (SELECT enabled FROM cleanup_guard)=0 BEGIN SELECT RAISE(ABORT,'immutable'); END;`).join('')}
+DROP TRIGGER memories_immutable_update;
+CREATE TRIGGER memories_immutable_update BEFORE UPDATE ON memories WHEN (SELECT enabled FROM cleanup_guard)=0 BEGIN SELECT RAISE(ABORT,'immutable'); END;
 ` }];
 
 export function migrate(db: DatabaseSync, steps: readonly Migration[] = migrations): void {

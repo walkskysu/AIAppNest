@@ -34,6 +34,8 @@ npm.cmd test        # 类型检查、生产构建、真实进程测试及已有 
 
 ## 本地持久化
 
+数据管理提供一致性目录备份、校验、新目录暂存恢复与显式切换、应用/会话回收站及可重试彻底清理。备份包含未彻底删除的托管数据，排除凭据与外部授权目录；恢复后重新绑定。操作范围、保留与回退规则见 [Data 设计](docs/technical/data-architecture.md)，自动化和新账户演练待验收项见 [B01–B11 记录](docs/technical/data-validation.md)。Refs #19，最终验收未完成，PR 保持草稿。
+
 聊天工作空间现支持系统选择文本附件、托管导入、受控任务输出登记、按 Run/会话查看产物、安全文本/PNG/JPEG 预览及显式打开。类型、配额、权限与保留规则见 [FileService 架构](docs/technical/file-architecture.md)，F01–F10 自动化及真实模型待验收项见 [文件验证记录](docs/technical/file-validation.md)。
 
 应用空间支持“记住这条”和手动记忆管理：确认编辑、类型过滤、停用、删除与来源跳转。启用应用记忆并发布后，新会话按相关性、版本和剩余上下文预算检索，右侧可查看各轮原始参考版本。删除停止未来检索，旧会话与备份仍可能含内容。详见 [记忆设计](docs/technical/memory-architecture.md) 和 [M01–M10 验收记录](docs/technical/memory-validation.md)；真实模型及人工验收未完成，Refs #16 的 PR 保持草稿。
@@ -56,7 +58,7 @@ RunScheduler 提供同会话串行、全局/模型额度、重叠目录写锁、
 
 Service Host 在数据库初始化成功后报告就绪。默认数据目录为 `%LOCALAPPDATA%/LocalAIHub`，数据库位于 `data/platform.db`；显式 Electron `--user-data-dir` profile 使用其 `platform` 子目录。数据库启用外键、WAL 和 busy timeout，初始化失败保留原数据并报告错误。只有 Service Host 操作产品数据库。
 
-领域与仓储已覆盖应用配置版本、Skill、会话、执行、消息/事件、版本化记忆、产物、提供商凭据引用和授权。详见[存储架构与一致性约定](docs/technical/storage-architecture.md)和[S01–S18 真实 SQLite 验证](docs/technical/storage-validation.md)。存储测试使用临时目录，不依赖个人数据或模型密钥；自动恢复核对、跨文件原子提交和备份恢复不在当前实现范围。
+领域与仓储已覆盖应用配置版本、Skill、会话、执行、消息/事件、版本化记忆、产物、提供商凭据引用和授权。详见[存储架构与一致性约定](docs/technical/storage-architecture.md)和[S01–S18 真实 SQLite 验证](docs/technical/storage-validation.md)。存储测试使用临时目录，不依赖个人数据或模型密钥；备份通过维护屏障协调 SQLite 与文件，不承诺任意跨文件原子提交。
 
 **验证状态：**既有 Foundation/Storage 已在托管 Windows 环境通过完整回归，包含真实 Electron 和 Node 的安全与生命周期验证；新增 Provider 的测试状态见 [P01–P18](docs/technical/provider-validation.md)。受限 shell 的 Electron sandbox ACL 失败记录仍保留；没有关闭沙箱或以模拟结果替代桌面验收。前置 [Pi Spike 报告](docs/technical/pi-windows-spike-report.md)的真实模型验收仍未完成，既有 DPAPI 回归通过不代表此前全部验收门禁解除。GitHub Actions 结果须以远端实际执行为准。
 

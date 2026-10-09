@@ -29,6 +29,29 @@ async function launch(t, root = resolve('dist')) {
 }
 async function ready(page) { await page.waitForFunction(() => document.querySelector('[data-testid="phase"]')?.getAttribute('data-phase') === 'ready'); }
 
+test('Data UI selects directories through Main, verifies backup, stages restore and exposes credential rebinding', {timeout:90000}, async t=>{
+  const parent=await mkdtemp(resolve('.test-data-ui-'));
+  t.after(()=>rm(parent,{recursive:true,force:true,maxRetries:10,retryDelay:100}));
+  const {app,page}=await launch(t);await ready(page);
+  const panel=page.getByTestId('data-settings');await panel.waitFor();
+  assert.match(await panel.textContent(),/旧备份仍保留/);
+  // Only the native picker result is substituted; Main still issues owner-bound tokens.
+  await app.evaluate(({dialog},path)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[path]});},parent);
+  await panel.getByRole('button',{name:'创建一致性备份',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('[data-testid="data-settings"] [role="status"]')?.textContent.includes('succeeded'));
+  const listing=await page.evaluate(()=>window.desktop.data({operation:'recycle.list'}));assert.equal(listing.ok,true);
+  const backup=listing.value.jobs.find(j=>j.kind==='backup');assert.equal(backup.state,'succeeded');
+  await app.evaluate(({dialog},path)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[path]});},backup.output);
+  await panel.getByRole('button',{name:'选择备份并校验',exact:true}).click();
+  await panel.getByText('备份完整性及兼容性校验通过，可恢复到新目录。',{exact:true}).waitFor();
+  await app.evaluate(({dialog},path)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[path]});},parent);
+  await panel.getByRole('button',{name:'恢复到新目录',exact:true}).click();
+  await panel.getByRole('button',{name:'停止服务、切换并重启',exact:true}).waitFor();
+  await panel.getByRole('button',{name:'打开凭据重绑设置',exact:true}).click();
+  await page.getByRole('button',{name:'关闭模型设置',exact:true}).waitFor();
+  assert.equal((await page.evaluate(()=>window.desktop.data({operation:'backups.create',path:'C:/arbitrary'}))).ok,false);
+});
+
 test('C01-C10 desktop wizard/chat uses production IPC + Pi with deterministic SSE; never claims live-model acceptance', { timeout:90000 }, async t => {
   const requests = [];
   const malicious = '<img src="https://invalid.example/track" onerror="window.PWNED=1"><script>window.PWNED=1</script> [bad](javascript:alert(1))';
@@ -466,7 +489,7 @@ test('F01/F02/F03/F10/F11 production Electron: real call chain, sandbox, reload 
   const initial = await page.evaluate(() => window.desktop.getStatus());
   const pid = initial.value.pid;
   const surface = await page.evaluate(() => ({ keys: Object.keys(window.desktop).sort(), require: typeof window.require, process: typeof window.process, ipc: typeof window.ipcRenderer }));
-  assert.deepEqual(surface, { keys: ['apps', 'chat', 'files', 'getStatus', 'memories', 'onStatusChanged', 'openExternal', 'ping', 'policy', 'providers', 'retryService', 'runs', 'selectAttachment', 'selectGrantDirectory', 'selectSkillDirectory', 'selectTrustedAutomation', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
+  assert.deepEqual(surface, { keys: ['apps', 'chat', 'data', 'files', 'getStatus', 'memories', 'onStatusChanged', 'openExternal', 'ping', 'policy', 'providers', 'retryService', 'runs', 'selectAttachment', 'selectData', 'selectGrantDirectory', 'selectSkillDirectory', 'selectTrustedAutomation', 'skills'], require: 'undefined', process: 'undefined', ipc: 'undefined' });
   const prefs = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences());
   for (const key of ['sandbox', 'contextIsolation', 'webSecurity']) assert.equal(prefs[key], true);
   for (const key of ['nodeIntegration', 'nodeIntegrationInWorker', 'nodeIntegrationInSubFrames', 'webviewTag', 'allowRunningInsecureContent']) assert.equal(prefs[key], false, key);

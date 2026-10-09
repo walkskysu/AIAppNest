@@ -1,3 +1,4 @@
+import {dataRequestSchema,dataReplySchema} from '@aiappnest/contracts';
 import { memoryRequestSchema, memoryReplySchema } from '@aiappnest/contracts';
 import { fileRequestSchema, fileReplySchema, fileScopeSchema, fileSelectionSchema } from '@aiappnest/contracts';
 import { chatRequestSchema, chatReplySchema } from '@aiappnest/contracts';
@@ -19,6 +20,16 @@ const listener = (_event: unknown, raw: unknown) => {
 ipcRenderer.on(channels.changed, listener);
 window.addEventListener('unload', () => { callbacks.clear(); ipcRenderer.removeListener(channels.changed, listener); });
 const api: DesktopAPI = {
+  data:async input=>{
+    const parsed=dataRequestSchema.safeParse(input);if(!parsed.success)return {ok:false,error:publicError('INVALID_INPUT')};
+    const reply=resultSchema(dataReplySchema).safeParse(await ipcRenderer.invoke(channels.data,parsed.data));
+    return reply.success?reply.data:{ok:false,error:publicError('PROTOCOL_ERROR')};
+  },
+  selectData:async purpose=>{
+    if(!['backup','package','restore'].includes(purpose))return {ok:false,error:publicError('INVALID_INPUT')};
+    const reply=resultSchema(dataReplySchema).safeParse(await ipcRenderer.invoke(channels.selectData,purpose));
+    return reply.success?reply.data:{ok:false,error:publicError('PROTOCOL_ERROR')};
+  },
   files: async input => {
     const parsed = fileRequestSchema.safeParse(input);
     if (!parsed.success) return { ok:false,error:publicError('INVALID_INPUT') };
