@@ -306,7 +306,10 @@ test('S18 product storage boundary and explicit retention: no implicit cascading
   for (const { name } of raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()) {
     for (const fk of raw.prepare(`PRAGMA foreign_key_list(${name})`).all()) assert.notEqual(fk.on_delete,'CASCADE');
   }
-  for (const file of ['main.cjs','preload.cjs','service-manager.cjs']) assert.doesNotMatch(readFileSync(resolve('dist',file),'utf8'),/node:sqlite|CREATE TABLE|platform\.db/);
+  // Main checks the database file's existence when choosing a whole restored root.
+  // Only Service Host may open SQLite or contain the schema/repository implementation.
+  assert.doesNotMatch(readFileSync(resolve('dist/main.cjs'),'utf8'),/node:sqlite|CREATE TABLE|DatabaseSync/);
+  for (const file of ['preload.cjs','service-manager.cjs']) assert.doesNotMatch(readFileSync(resolve('dist',file),'utf8'),/node:sqlite|CREATE TABLE|platform\.db/);
   for (const file of readdirSync(resolve('dist/renderer/assets')).filter(file => file.endsWith('.js'))) assert.doesNotMatch(readFileSync(resolve('dist/renderer/assets',file),'utf8'),/node:sqlite|CREATE TABLE|platform\.db/);
   assert.match(readFileSync(resolve('dist/service-host.cjs'),'utf8'),/node:sqlite/);
   assert.equal(storage.messages.list({ appId: a.app.id, conversationId: a.conversation.id }).length,1);

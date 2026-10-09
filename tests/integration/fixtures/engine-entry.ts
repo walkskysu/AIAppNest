@@ -19,3 +19,7 @@ export { DiagnosticLog, diagnostics } from '../../../apps/service-host/src/diagn
 export { activeTimeout } from '../../../packages/domain/src/active-time';
 export { readSession, projectionId } from '../../../packages/pi-adapter/src/session-reader';
 export { DomainError } from '@aiappnest/domain';
+
+export {DataService} from '../../../apps/service-host/src/data';
+export {BackupService,backupLimits,safeRelative} from '../../../apps/service-host/src/backups';
+export {selectedDataRoot,switchDataRoot} from '../../../apps/desktop/src/data-root';

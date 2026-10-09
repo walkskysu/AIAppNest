@@ -1,7 +1,7 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, backup } from 'node:sqlite';
 import { join, isAbsolute, relative, sep } from 'node:path';
 import {
-  DomainError, assertMessageTransition, assertRunTransition, terminalRunStates, timestamp,
+  DomainError, id, assertMessageTransition, assertRunTransition, terminalRunStates, timestamp,
   type Attachment, type App, type AppId, type AppRevision, type AppSkill, type Artifact, type Conversation, type ConversationId,
   type Grant, type Memory, type Message, type ProviderProfile, type Run, type RunId, type RunState,
   type RunEvent, type RunMemoryLink, type Skill, type Timestamp,
@@ -12,6 +12,7 @@ import { guard, repository, type RepositorySpec } from './repository';
 import { schemas } from './schemas';
 import { SearchIndex, SEARCH_VERSION, searchTerms } from './search';
 import { CandidateStore } from './candidates';
+import { MaintenanceStore } from './maintenance';
 export { normalizeSearch } from './search';
 import { appConfigSchema, newAppConfig, type AppConfig } from '@aiappnest/domain';
 export { DataPaths, resolveDataRoot } from './paths';
@@ -41,6 +42,7 @@ export class Storage {
   readonly grants;
   readonly search: SearchIndex;
   readonly candidates: CandidateStore;
+  readonly maintenance: MaintenanceStore;
 
   constructor(root = resolveDataRoot()) {
     this.paths = new DataPaths(root);
@@ -85,6 +87,7 @@ export class Storage {
     this.grants = make<Grant, Key<Grant,'id'|'appId'>, AppScope>('grants', schemas.grants, ['id','appId'], ['appId'], 'createdAt,id');
     this.search = new SearchIndex(this.db, fn => this.transaction(fn));
     this.candidates = new CandidateStore(this.db);
+    this.maintenance = new MaintenanceStore(this.db,fn=>this.transaction(fn as any) as any);
     if (this.db.prepare('SELECT version FROM search_meta').get()?.version !== SEARCH_VERSION) {
       try { this.search.rebuild(); } catch { /* Raw data remains available; searches fail closed until rebuild succeeds. */ }
     }
@@ -113,6 +116,7 @@ export class Storage {
       if (this.db.prepare('SELECT 1 FROM app_skills WHERE skillId=? AND skillVersion=? LIMIT 1').get(skillId,version)) throw new DomainError('SKILL_IN_USE');
       // Old configurations may predate app_skills population; preserve those references too.
       if (this.db.prepare("SELECT 1 FROM app_revisions r, json_each(r.config,'$.skills') s WHERE json_extract(s.value,'$.id')=? AND json_extract(s.value,'$.version')=? LIMIT 1").get(skillId,version)) throw new DomainError('SKILL_IN_USE');
+      if (this.db.prepare("SELECT 1 FROM app_drafts d, json_each(d.config,'$.skills') s WHERE json_extract(s.value,'$.id')=? AND json_extract(s.value,'$.version')=? LIMIT 1").get(skillId,version)) throw new DomainError('SKILL_IN_USE');
       this.db.prepare('DELETE FROM skill_registry WHERE id=? AND version=?').run(skillId,version);
       this.db.prepare('DELETE FROM skills WHERE id=? AND version=?').run(skillId,version);
     });
@@ -203,6 +207,7 @@ export class Storage {
   }
   recycleConversation(appId: AppId, conversationId: ConversationId) {
     this.transaction(() => {
+      if (this.maintenance.tombstone({appId,conversationId})) throw new DomainError('INVALID_INPUT');
       this.archiveConversation(appId,conversationId);
       this.db.prepare('INSERT OR IGNORE INTO conversation_recycle VALUES(?,?,?,?)').run(conversationId,appId,'chat-and-attachments;preserve-memory;preserve-artifacts',timestamp());
     });
@@ -499,6 +504,17 @@ export class Storage {
     if (this.closed) return;
     if (this.depth) throw new DomainError('INVALID_INPUT', 'Cannot close during a transaction');
     guard(() => this.db.close()); this.closed = true;
+  }
+  /** Caller holds the service maintenance barrier through both DB and file copying. */
+  async backupTo(destination: string): Promise<void> { await backup(this.db, destination); }
+  appSkillsForCleanup(appId:string) {
+    return this.db.prepare('SELECT DISTINCT skillId id,skillVersion version FROM app_skills WHERE revisionId IN (SELECT id FROM app_revisions WHERE appId=?)').all(appId);
+  }
+  forgetScope(scope:{appId:string;conversationId?:string}) {
+    this.transaction(()=>{
+      const rows=this.db.prepare('SELECT id,max(version) version FROM memories WHERE appId=?'+(scope.conversationId?' AND sourceConversationId=?':'')+' GROUP BY id').all(scope.appId,...(scope.conversationId?[scope.conversationId]:[]));
+      for(const row of rows){const m=this.memories.get({appId:id<'app'>(scope.appId),id:id<'memory'>(String(row.id)),version:Number(row.version)});if(m.status!=='deleted')this.reviseMemory({...m,version:m.version+1,status:'deleted',updatedAt:timestamp()},m.version);}
+    });
   }
   settings(): { foreignKeys: number; journalMode: string; busyTimeout: number; synchronous: number } {
     return guard(() => ({ foreignKeys: this.db.prepare('PRAGMA foreign_keys').get()!.foreign_keys as number,

@@ -24,7 +24,8 @@
     "provider:live": "node scripts/provider-live.mjs",
     "engine:live": "node scripts/engine-live.mjs",
     "file:live": "node scripts/file-live.mjs",
-    "recovery:verify": "npm run typecheck && npm run build && node scripts/recovery-faults.mjs"
+    "recovery:verify": "npm run typecheck && npm run build && node scripts/recovery-faults.mjs",
+    "data:verify": "npm run typecheck && npm run build && node scripts/data-verify.mjs"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "0.73.1",

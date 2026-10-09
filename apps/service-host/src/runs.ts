@@ -48,6 +48,24 @@ export class RunScheduler {
   private pending: { run: Run; type: string; payload: unknown }[] = [];
   private pendingBytes = 0;
   private stopped = false;
+  private maintenance = false;
+  /** Stop admission/extraction, drain admitted work, then close every cached worker. */
+  async freeze(signal: AbortSignal): Promise<void> {
+    if (this.maintenance || this.stopped || this.failed) throw new DomainError('BUSY');
+    this.maintenance = true;
+    try {
+      while (this.queue.length || this.active.size || this.extracting) {
+        signal.throwIfAborted();
+        if (this.failed || this.stopped) throw new DomainError('STORAGE_UNAVAILABLE');
+        await new Promise(resolve => setTimeout(resolve,20));
+      }
+      await Promise.all([...this.workers.values()].map(entry => entry.retiring ?? entry.worker.close(true)));
+      this.workers.clear(); this.flush(); signal.throwIfAborted();
+      if (this.failed || this.storage.unfinishedRuns().length) throw new DomainError('STORAGE_UNAVAILABLE');
+    } catch (error) { this.resume(); throw error; }
+  }
+  resume(): void { this.maintenance = false; this.schedule(); }
+  unretireConversation(conversationId: string): void { this.retiring.delete(conversationId); }
   private failed = false;
   private closing?: Promise<void>;
   private timer: NodeJS.Timeout;
@@ -173,6 +191,7 @@ export class RunScheduler {
       return { operation: 'submit', run: existing, duplicate: true };
     }
     if (this.stopped) throw new DomainError('SHUTTING_DOWN');
+    if (this.maintenance) throw new DomainError('BUSY');
     if (this.retiring.has(conversationId)) throw new DomainError('INVALID_INPUT');
     if (this.failed) throw new DomainError('STORAGE_UNAVAILABLE');
     if (conversation.revisionId !== input.revisionId) throw new DomainError('VERSION_CONFLICT');
@@ -234,7 +253,7 @@ export class RunScheduler {
       this.active.set(job.run.id, job);
       job.done = this.execute(job);
     }
-    if(!this.active.size && !this.queue.length) this.extractNext();
+    if(!this.maintenance && !this.active.size && !this.queue.length) this.extractNext();
   }
   private extractNext() {
     const next=this.storage.candidates.pending()[0];if(!next) return;

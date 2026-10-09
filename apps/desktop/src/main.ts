@@ -6,6 +6,8 @@ import { channels, emptySchema, publicError, skillRequestSchema, type Result, ty
 import { ServiceManager } from './service-manager';
 import { policyScopeSchema, policyRequestSchema, trustedBoundaryNotice } from '@aiappnest/contracts';
 import { fileRequestSchema, fileScopeSchema } from '@aiappnest/contracts';
+import { dataRequestSchema } from '@aiappnest/contracts';
+import { selectedDataRoot, switchDataRoot } from './data-root';
 
 declare const __DEV__: boolean;
 const origin = 'app://desktop';
@@ -28,9 +30,12 @@ if (!app.requestSingleInstanceLock()) {
   });
   void app.whenReady().then(async () => {
     const root = app.getAppPath();
+    const profile=app.getPath('userData');
+    const initialDataRoot=app.commandLine.hasSwitch('user-data-dir')?join(profile,'platform'):join(process.env.LOCALAPPDATA!,'LocalAIHub');
+    const currentDataRoot=selectedDataRoot(profile,initialDataRoot);
     service = new ServiceManager({ nodePath: join(root, 'runtime', process.platform === 'win32' ? 'node.exe' : 'node'), entry: join(root, 'service-host.cjs'),
       // An explicitly selected Electron profile also isolates its platform data (tests/portable profiles).
-      dataRoot: app.commandLine.hasSwitch('user-data-dir') ? join(app.getPath('userData'), 'platform') : undefined,
+      dataRoot: currentDataRoot,
     });
     const ses = session.defaultSession;
     ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -84,6 +89,30 @@ if (!app.requestSingleInstanceLock()) {
     handle(channels.apps, (raw) => service!.apps(raw));
     // Identity belongs to this Main document generation; the renderer cannot supply it.
     let skillOwner = randomUUID(), choosingSkill = false;
+    let choosingData=false;
+    ipcMain.handle(channels.selectData,async(event,raw:unknown)=>{
+      if(!trusted(event))return {ok:false,error:publicError('FORBIDDEN')};
+      if(!['backup','package','restore'].includes(String(raw)))return {ok:false,error:publicError('INVALID_INPUT')};
+      if(choosingData)return {ok:false,error:publicError('BUSY')};
+      choosingData=true;const owner=skillOwner;
+      try {
+        const result=await dialog.showOpenDialog(window!,{title:raw==='package'?'选择 .aibackup 备份目录':raw==='restore'?'选择新数据目录的父目录':'选择备份目标目录',properties:['openDirectory','createDirectory']});
+        if(!trusted(event)||owner!==skillOwner)return {ok:false,error:publicError('FORBIDDEN')};
+        if(result.canceled||!result.filePaths[0])return {ok:true,value:{operation:'select'}};
+        return service!.data({operation:'select',owner,purpose:raw,path:result.filePaths[0]});
+      }finally{choosingData=false;}
+    });
+    ipcMain.handle(channels.data,async(event,raw:unknown)=>{
+      if(!trusted(event))return {ok:false,error:publicError('FORBIDDEN')};
+      const parsed=dataRequestSchema.safeParse(raw);if(!parsed.success)return {ok:false,error:publicError('INVALID_INPUT')};
+      const reply=await service!.data({operation:'request',owner:skillOwner,request:parsed.data});
+      if(reply.ok && reply.value.restartRequired && reply.value.job?.output) {
+        await service!.stop();
+        try{switchDataRoot(profile,currentDataRoot,reply.value.job.output);app.relaunch();app.quit();}
+        catch{console.error('Data root switch failed; restarting from the committed root pointer.');app.relaunch();app.quit();return {ok:false,error:publicError('STORAGE_UNAVAILABLE')};}
+      }
+      return reply;
+    });
     let choosingFile = false;
     ipcMain.handle(channels.selectAttachment,async (event,raw: unknown) => {
       if (!trusted(event)) return { ok:false,error:publicError('FORBIDDEN') };

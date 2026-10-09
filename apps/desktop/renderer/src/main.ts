@@ -4,6 +4,7 @@ import './style.css';
 import { ProviderSettings } from './providers';
 import { ApplicationHome } from './apps';
 import { SkillLibrary } from './skills';
+import { DataSettings } from './data';
 
 createApp(defineComponent({
   setup() {
@@ -42,6 +43,7 @@ createApp(defineComponent({
       h('button',{ class:'secondary',onClick:() => { library.value = !library.value; },disabled:status.value.phase !== 'ready' },library.value ? '关闭技能库':'技能库'),
       library.value ? h(SkillLibrary,{ ready:status.value.phase === 'ready' }) : null,
       h(ApplicationHome, { ready: status.value.phase === 'ready' }),
+      status.value.phase==='ready'?h(DataSettings,{onCredentials:()=>{settings.value=true;window.scrollTo({top:0,behavior:'smooth'});}}):null,
       h('section', { class: 'card' }, [
         h('div', { class: 'status-line' }, [h('span', { class: `dot ${status.value.phase}` }), h('h2', { 'data-testid': 'phase', 'data-phase': status.value.phase, role: 'status' }, names[status.value.phase])]),
         h('p', status.value.error?.message ?? '通过受控进程通信管理服务，不开放本地网络端口。'),
@@ -51,7 +53,7 @@ createApp(defineComponent({
         ]),
         h('p', { class: 'diagnostic', 'data-testid': 'diagnostic', role: 'status' }, diagnostic.value),
       ]),
-      h('section', { class: 'boundary' }, [h('h2', '当前可用'), h('p', '创建向导 · 隔离试运行 · 应用内对话 · 技能库 · 模型设置 · 权限确认'), h('h2', '后续接入'), h('p', '附件上传、产物预览、记忆管理和完整回收站尚未接入。'), h('p', '关闭窗口将停止服务；服务异常后不会自动重放请求。')]),
+      h('section', { class: 'boundary' }, [h('h2', '当前可用'), h('p', '创建向导 · 应用内对话 · 文件产物 · 记忆管理 · 技能库 · 模型设置 · 备份恢复 · 回收站'), h('p', '关闭窗口将停止服务；服务异常后不会自动重放请求。')]),
     ]);
   },
 })).mount('#app');

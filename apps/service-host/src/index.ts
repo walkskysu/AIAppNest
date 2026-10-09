@@ -1,3 +1,4 @@
+import { DataService } from './data';
 import { MemoryService } from '../../../packages/memory/src/index';
 import { FileService } from './files';
 import { ChatService } from './chat';
@@ -26,10 +27,13 @@ let runs: RunScheduler | undefined;
 let memories: MemoryService | undefined;
 let chat: ChatService | undefined;
 let files: FileService | undefined;
+let data: DataService | undefined;
+let pendingWrites=0;
 let closing: Promise<void> | undefined;
 const close = () => { policy?.close(); policy = undefined; storage?.close(); storage = undefined; };
 const shutdown = () => closing ??= (async () => {
   ready = false;
+  await data?.close();
   files?.close();
   try { await runs?.close(); } catch { process.exitCode = 1; }
   finally { close(); if (process.connected) process.disconnect(); }
@@ -50,6 +54,11 @@ process.on('message', (raw: unknown) => {
     return;
   }
   const message = parsed.data;
+  if (ready && data?.busy && !['data','shutdown','ping'].includes(message.kind)) {
+    const permitted=message.kind==='runs' && ['cancel','get','next','subscribe','unsubscribe'].includes(message.input.operation)
+      || data.waiting && message.kind==='policy';
+    if(!permitted && 'id' in message){send({kind: (message.kind+'-response'),id:message.id,result:{ok:false,error:publicError('BUSY')}} as HostOutput);return;}
+  }
   if (message.kind === 'shutdown') { clearTimeout(handshakeDeadline); void shutdown(); return; }
   if (message.kind === 'hello' && !ready) {
     clearTimeout(handshakeDeadline);
@@ -63,6 +72,7 @@ process.on('message', (raw: unknown) => {
       policy = new PolicyService(storage, (appId, revisionId) => apps!.readRevision(appId, revisionId), { registerOutput: (scope,path) => files!.registerOutput(scope,path).id });
       runs = new RunScheduler({ storage, apps, providers, policy, files }, readEngineRuntime(__dirname), readRunSettings(storage));
       chat = new ChatService(storage, apps, runs);
+      data = new DataService(storage,runs,()=>pendingWrites);
     }
     catch {
       send({ kind: 'fatal', error: publicError('STORAGE_UNAVAILABLE') });
@@ -74,8 +84,10 @@ process.on('message', (raw: unknown) => {
     send({ kind: 'ready', nonce: message.nonce, version: SERVICE_PROTOCOL_VERSION, pid: process.pid, nodeVersion: process.versions.node });
   } else if (message.kind === 'ping' && ready) {
     send({ kind: 'response', id: message.id, result: { ok: true, value: { text: message.input.text, pid: process.pid, nodeVersion: process.versions.node } } });
+  } else if (message.kind === 'data' && ready) {
+    send({kind:'data-response',id:message.id,result:data!.request(message.input)});
   } else if (message.kind === 'providers' && ready) {
-    void providers!.request(message.input).then(result => send({ kind: 'providers-response', id: message.id, result }));
+    pendingWrites++;void providers!.request(message.input).then(result => send({ kind: 'providers-response', id: message.id, result })).finally(()=>pendingWrites--);
   } else if (message.kind === 'apps' && ready) {
     send({ kind: 'apps-response', id: message.id, result: apps!.request(message.input) });
   } else if (message.kind === 'skills' && ready) {
@@ -83,7 +95,7 @@ process.on('message', (raw: unknown) => {
   } else if (message.kind === 'policy' && ready) {
     send({ kind: 'policy-response', id: message.id, result: policy!.request(message.input) });
   } else if (message.kind === 'files' && ready) {
-    void files!.request(message.input).then(result => send({ kind:'files-response',id:message.id,result }));
+    pendingWrites++;void files!.request(message.input).then(result => send({ kind:'files-response',id:message.id,result })).finally(()=>pendingWrites--);
   } else if (message.kind === 'memories' && ready) {
     send({ kind:'memories-response',id:message.id,result:memories!.request(message.input) });
   } else if (message.kind === 'chat' && ready) {

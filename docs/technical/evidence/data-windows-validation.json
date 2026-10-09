@@ -1,0 +1,42 @@
+{
+  "issue": 19,
+  "reference": "Refs #19",
+  "startedAt": "2026-10-09T05:37:56.937Z",
+  "finishedAt": "2026-10-09T05:38:35.173Z",
+  "platform": "win32",
+  "node": "24.19.0",
+  "command": "npm run data:verify",
+  "exitCode": 0,
+  "automaticSuite": "PASS",
+  "model": "DETERMINISTIC_HTTP_FIXTURE",
+  "independentDirectoryRestore": "PASS_REAL_SQLITE_FILES_PI_SESSION",
+  "cases": {
+    "B01": "real scheduler/SQLite WAL; controlled extraction and in-flight write barriers; cancellation and copy fault",
+    "B02": "real raw Pi JSONL, attachments, artifacts, Skill and memory in a fresh directory",
+    "B03": "Chinese/spaced root; exact session mapping; rebind and actual Pi continuation with fixture model",
+    "B04": "credential markers absent from package bytes; secretRef cleared and grants absent",
+    "B05": "missing/hash/traversal/case alias/runtime/quota/link/reference failures rejected",
+    "B06": "injected staging migration/publication failure preserves live root",
+    "B07": "injected pointer interruption; old/new complete root selection; invalid marker fallback",
+    "B08": "conversation/app recycle, independent recycle state, index rebuild, unarchive bypass rejected",
+    "B09": "raw file purge; external originals/backups and other recycled app Skill preserved; source tombstones",
+    "B10": "injected file and post-metadata Skill failure; persistent idempotent retry after service restart",
+    "B11": "NEW_WINDOWS_ACCOUNT_PENDING"
+  },
+  "simulatedFaults": [
+    "copy failure",
+    "migration failure",
+    "publication failure",
+    "pointer interruption",
+    "file deletion denial"
+  ],
+  "pending": [
+    "B01-B11 manual desktop acceptance and independent new Windows account restore drill",
+    "Real-model original session/artifact restore and credential/external-directory rebinding",
+    "#18 real model and H01-H11 manual acceptance",
+    "#17 actual Windows sleep/wake, physical restricted volume and manual UI acceptance",
+    "Earlier Engine/Chat/File/Memory real-model and manual acceptance"
+  ],
+  "finalAcceptance": "PENDING",
+  "draftRequired": true
+}

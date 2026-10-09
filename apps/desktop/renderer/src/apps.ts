@@ -211,6 +211,7 @@ export const ApplicationHome = defineComponent({
           }), button('复制', async () => { const result = await call({ operation: 'copy', appId: app.id, expectedVersion: app.version }); if ('app' in result) await choose(result.app);
             feedback.value = '已复制非敏感配置；模型关联和外部目录授权需重新配置，历史未复制。'; await list(); }),
           button(app.archived ? '恢复' : '归档', async () => { await call({ operation: 'archive', appId: app.id, expectedVersion: app.version, archived: !app.archived }); await list(); }),
+          button('移入回收站',async()=>{const r=await window.desktop.data({operation:'recycle.move',appId:app.id});feedback.value=r.ok?'已移入回收站，可在数据管理中恢复。':r.error.message;await list();}),
         ]),
       ]))),
       h('div', { class: 'actions' }, [h('p', `共 ${total.value} 个应用`), button('上一页', async () => { offset.value = Math.max(0, offset.value - 12); await list(); }, offset.value === 0),

@@ -203,6 +203,7 @@ export class AppService {
         icon: app.icon, status: 'draft', currentRevisionId: null, version: 1, createdAt: now, updatedAt: now });
       this.storage.saveAppDraft(app.id, config, source.category, false);
     } else if (request.operation === 'archive') {
+      if(this.storage.maintenance.recycled({appId:app.id}) || this.storage.maintenance.tombstone({appId:app.id})) throw new DomainError('INVALID_TRANSITION');
       if (request.archived && this.storage.activeAppRuns(app.id)) throw new DomainError('INVALID_TRANSITION');
       app = this.storage.updateApp(app.id, app.version, { name: app.name, description: app.description, icon: app.icon,
         status: request.archived ? 'archived' : app.currentRevisionId ? 'ready' : 'draft' });
